@@ -1,0 +1,8 @@
+# Parameters applied ONLY in SITL (scripts/sim.sh), never on hardware.
+# Each one relaxes a safety check that exists for a real vehicle but has no
+# meaning in an unattended simulation.
+
+# Data-link-loss failsafe off: SITL runs without a ground station, and with
+# NAV_DLL_ACT > 0 PX4 refuses to arm ("Preflight Fail: No connection to the GCS").
+# On hardware keep this enabled and fly with a GCS link.
+NAV_DLL_ACT 0

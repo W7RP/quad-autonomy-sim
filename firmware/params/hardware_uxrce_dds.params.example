@@ -1,0 +1,15 @@
+# EXAMPLE ONLY: not used in simulation. Transport settings for a real
+# Pixhawk-class flight controller talking to a companion computer.
+# In SITL the client connects over UDP to 127.0.0.1:8888 and none of this applies.
+#
+# Serial link (e.g. TELEM2 -> companion UART), agent started with:
+#   MicroXRCEAgent serial --dev /dev/ttyAMA0 -b 921600
+UXRCE_DDS_CFG 102        # 102 = TELEM2
+SER_TEL2_BAUD 921600
+MAV_1_CONFIG 0           # free TELEM2 from MAVLink if it was assigned there
+#
+# Ethernet alternative (Pixhawk 6X etc.), agent started with:
+#   MicroXRCEAgent udp4 -p 8888
+# UXRCE_DDS_CFG 1000      # Ethernet
+# UXRCE_DDS_AG_IP <companion IPv4 as int32>
+# UXRCE_DDS_PRT 8888

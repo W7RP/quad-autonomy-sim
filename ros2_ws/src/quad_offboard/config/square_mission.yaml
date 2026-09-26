@@ -1,0 +1,13 @@
+offboard_square:
+  ros__parameters:
+    px4_namespace: ""          # set per-vehicle for multi-vehicle SITL (e.g. "/px4_1")
+    square_side_m: 5.0
+    altitude_m: 3.0
+    control_rate_hz: 20.0      # PX4 needs > 2 Hz (COM_OF_LOSS_T) to stay in offboard
+    cruise_speed_mps: 2.0
+    vertical_speed_mps: 1.0
+    position_gain: 0.8
+    acceptance_radius_m: 0.3
+    acceptance_speed_mps: 0.3
+    engage_timeout_s: 20.0
+    shutdown_when_done: true

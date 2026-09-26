@@ -1,0 +1,19 @@
+# PX4 parameters this project depends on, one "NAME VALUE" per line.
+#
+# SITL: scripts/sim.sh applies these at every boot (as PX4_PARAM_* env vars early
+#       in boot, then again via `px4-param set` once boot finishes; see sim.sh).
+# Hardware: apply the same values with QGroundControl or the MAVLink console
+#       (`param set NAME VALUE`), plus the transport settings in
+#       firmware/params/hardware_uxrce_dds.params.example.
+#
+# Only list parameters we actually rely on, each with the reason. Anything not
+# here is the airframe default for gz_x500 (SYS_AUTOSTART 4001).
+
+# Offboard: fall out of offboard if no setpoint for 1 s (the node streams at 20 Hz).
+COM_OF_LOSS_T 1.0
+# Offboard-loss action: 5 = Hold mode (hover in place). The node never re-engages on its own.
+COM_OBL_RC_ACT 5
+# Auto-disarm 2 s after landing; the node treats "disarmed" as mission complete.
+COM_DISARM_LAND 2.0
+# DDS domain the uXRCE-DDS client joins; must match ROS_DOMAIN_ID on the ROS 2 side.
+UXRCE_DDS_DOM_ID 0
