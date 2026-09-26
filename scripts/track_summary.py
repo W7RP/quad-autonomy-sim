@@ -8,6 +8,7 @@ Input: CSV from `ros2 topic echo --csv /fmu/out/vehicle_local_position_v1`
 import argparse
 import csv
 import sys
+import warnings
 
 # Column indices in VehicleLocalPosition (px4_msgs release/1.17):
 # timestamp, timestamp_sample, xy_valid, z_valid, v_xy_valid, v_z_valid, x, y, z, ...
@@ -21,23 +22,36 @@ def main() -> int:
     args = ap.parse_args()
 
     t, x, y, alt = [], [], [], []
+    dropped = 0      # samples with an absurd timestamp
+    clock_steps = 0  # small backward steps from timesync re-convergence
     with open(args.csv, newline="") as f:
         for row in csv.reader(f):
             if len(row) <= Z:
                 continue
             try:
-                t.append(int(row[T]) * 1e-6)
-                x.append(float(row[X]))
-                y.append(float(row[Y]))
-                alt.append(-float(row[Z]))  # NED z down -> altitude up
+                ts = int(row[T]) * 1e-6
+                sample = (float(row[X]), float(row[Y]), -float(row[Z]))  # NED z -> altitude
             except ValueError:
                 continue
+            # When PX4's uXRCE-DDS timesync re-converges, one sample can carry raw
+            # boot time (absurd jump: dropped) and the clock may then step back by
+            # a fraction of a second (valid data: kept, counted).
+            if t and abs(ts - t[-1]) > 5.0:
+                dropped += 1
+                continue
+            if t and ts < t[-1]:
+                clock_steps += 1
+            t.append(ts)
+            x.append(sample[0])
+            y.append(sample[1])
+            alt.append(sample[2])
     if not t:
         print(f"no samples in {args.csv}", file=sys.stderr)
         return 1
 
     t0 = t[0]
-    print(f"samples:   {len(t)} over {t[-1] - t0:.1f} s")
+    print(f"samples:   {len(t)} over {t[-1] - t0:.1f} s "
+          f"({dropped} dropped for bad timestamp, {clock_steps} backward clock step(s))")
     print(f"north [m]: {min(x):6.2f} .. {max(x):6.2f}  (span {max(x) - min(x):.2f})")
     print(f"east  [m]: {min(y):6.2f} .. {max(y):6.2f}  (span {max(y) - min(y):.2f})")
     print(f"alt   [m]: {min(alt):6.2f} .. {max(alt):6.2f}")
@@ -45,6 +59,9 @@ def main() -> int:
 
     if args.png:
         try:
+            # The apt mpl_toolkits next to a pip matplotlib triggers a harmless
+            # "Unable to import Axes3D" warning; no 3D plots are used here.
+            warnings.filterwarnings("ignore", message="Unable to import Axes3D")
             import matplotlib
             matplotlib.use("Agg")
             import matplotlib.pyplot as plt

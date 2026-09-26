@@ -11,7 +11,7 @@ breaks after an upgrade, diff against this first.
 | WSL kernel | 6.18.33.2-microsoft-standard-WSL2 |
 | Distro | Ubuntu 22.04.5 LTS (jammy) |
 | Compiler | gcc 11.4.0 (C++20), cmake 3.22.1 |
-| Python | 3.10.12 (NumPy 2.2.6 pip-installed into `~/.local` by PX4's `ubuntu.sh`) |
+| Python | 3.10.12; NumPy 2.2.6 (pip, `~/.local`, from PX4's `ubuntu.sh`); matplotlib 3.10.9 (pip, `~/.local`, see issue 2) |
 
 ## Stack
 
@@ -52,8 +52,18 @@ breaks after an upgrade, diff against this first.
 2. **NumPy 2 vs apt matplotlib.** PX4's `ubuntu.sh` pip-installs NumPy 2.2.6 into
    `~/.local`, which shadows Ubuntu's NumPy 1.21 and breaks the apt `matplotlib`
    (`_ARRAY_API not found`). ROS 2 CLI tools were unaffected. Only plotting is.
-   Fix: `pip3 install --user "matplotlib>=3.9"`. `track_summary.py` detects the
-   problem and prints that hint.
-3. **`ros2 topic hz` on Humble has no `--qos-reliability` flag.** It isn't needed:
+   Fix (applied): `pip3 install --user "matplotlib>=3.9"`, which installed 3.10.9 and
+   also pulled pyparsing 3.3.3 and contourpy 1.3.2 into `~/.local`. Neither PX4
+   nor ROS 2 Humble imports pyparsing; the ROS CLI, colcon and PX4 builds were
+   re-checked afterwards. `track_summary.py` still detects the broken combination
+   and prints the hint, for other machines.
+3. **Timesync step mid-flight.** In the verified demo run, PX4 published one
+   `vehicle_local_position` sample stamped with raw boot time (36.58 s instead
+   of about 1.79e9 s), and the corrected clock then stepped back about 0.31 s,
+   consistent with the uXRCE-DDS timesync re-converging. It didn't affect
+   Phase 1, which uses no timestamps for control. `track_summary.py` drops the
+   absurd sample and keeps the rest. The Phase 2 estimator must handle this
+   explicitly (docs/phase2_state_estimation.md).
+4. **`ros2 topic hz` on Humble has no `--qos-reliability` flag.** It isn't needed:
    `hz` matches PX4's best-effort publishers as-is. `ros2 topic echo` does take the
    flag.

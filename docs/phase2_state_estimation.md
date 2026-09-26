@@ -35,6 +35,7 @@ phase.
 | No heap allocation in the hot path | fixed-size Eigen types (`Matrix<double,15,15>`); ring buffers as `std::array`; `EIGEN_RUNTIME_NO_MALLOC` asserted in debug builds; loaned messages where the middleware supports them |
 | Explicit executor design | IMU propagation in its own MutuallyExclusive group; measurement updates in a second group; publishing in a third; MultiThreadedExecutor with exactly those threads; a lock-free SPSC queue between propagation and update |
 | Out-of-order measurements | a short IMU history ring buffer, so late flow or VIO samples are fused at their own timestamp |
+| Timestamp gating | Seen in Phase 1 when PX4's uXRCE-DDS timesync re-converged mid-flight: one `vehicle_local_position` sample (of about 1700) was stamped with raw boot time, and the timesync-corrected clock then stepped **back** about 0.31 s. The filter must reject absurd jumps, and treat a small backward step as a clock discontinuity (re-anchor) rather than a negative `dt`. Alternatively, run the filter on `timestamp_sample` deltas from PX4's monotonic clock |
 | Watchdogs | per-callback timing statistics published as diagnostics, and a warning when a deadline is missed |
 
 A separate `robot_localization` launch file can run on the same bag files as a
