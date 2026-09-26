@@ -1,0 +1,19 @@
+# colcon
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/
+# external packages fetched by scripts/setup/03_build_workspace.sh
+ros2_ws/src/external/
+# run outputs
+logs/
+*.bag
+rosbag2_*/
+# editors / tooling
+.vscode/
+.idea/
+*.swp
+__pycache__/
+compile_commands.json
+.cache/
+# left behind by PX4 ubuntu.sh (sudo wget) when setup is run from the repo root
+wget-log*
