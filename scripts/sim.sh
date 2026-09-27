@@ -71,8 +71,11 @@ apply_params_post_boot() {
 # attaches to whatever world is already running, and two servers of the same
 # world name collide on gz-transport topics. Seen here: an orphaned server
 # survived SIGTERM and silently shared the machine with later runs.
-if stale="$(pgrep -f "gz sim" | tr '\n' ' ')" && [[ -n "$stale" ]]; then
-  die "Gazebo already running (pid $stale). Stop it first: pkill -KILL -f 'gz sim'"
+# Patterns are anchored (^gz sim): a Gazebo process's command line starts with
+# it, while an unanchored pattern also matches any shell or editor whose command
+# line merely contains the text.
+if stale="$(pgrep -f '^gz sim' | tr '\n' ' ')" && [[ -n "$stale" ]]; then
+  die "Gazebo already running (pid $stale). Stop it first: pkill -KILL -f '^gz sim'"
 fi
 
 pids=()
@@ -80,14 +83,14 @@ cleanup() {
   for pid in "${pids[@]}"; do kill "$pid" 2>/dev/null || true; done
   # PX4 or this script started gz sim; make sure no server/GUI outlives the
   # session. An orphaned gz server was seen ignoring SIGTERM, so escalate.
-  pkill -f "gz sim.*${world}.sdf" 2>/dev/null || true
-  pkill -f "gz sim -g" 2>/dev/null || true
+  pkill -f "^gz sim.*${world}.sdf" 2>/dev/null || true
+  pkill -f "^gz sim -g" 2>/dev/null || true
   for _ in $(seq 1 10); do
-    pgrep -f "gz sim.*${world}.sdf|gz sim -g" >/dev/null || break
+    pgrep -f "^gz sim.*${world}.sdf|^gz sim -g" >/dev/null || break
     sleep 0.5
   done
-  pkill -KILL -f "gz sim.*${world}.sdf" 2>/dev/null || true
-  pkill -KILL -f "gz sim -g" 2>/dev/null || true
+  pkill -KILL -f "^gz sim.*${world}.sdf" 2>/dev/null || true
+  pkill -KILL -f "^gz sim -g" 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
 

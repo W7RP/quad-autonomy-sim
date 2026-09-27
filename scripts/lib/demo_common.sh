@@ -23,7 +23,7 @@ demo_cleanup() {
   done
   for pid in "${demo_pids[@]}"; do kill -9 "$pid" 2>/dev/null || true; done
   # Safety net if sim.sh was killed before its own cleanup finished.
-  pkill -KILL -f "gz sim" 2>/dev/null || true
+  pkill -KILL -f "^gz sim" 2>/dev/null || true  # anchored: never a shell mentioning it
   wait 2>/dev/null || true
 }
 
@@ -85,11 +85,17 @@ demo_record() {
 # `ros2 launch` starts several child processes; running it under setsid lets
 # demo_stop_launch signal the whole group, so no node is orphaned.
 demo_start_launch() {
-  local logfile="$1"
+  local logfile="$1" pidfile
   shift
-  setsid ros2 launch "$@" >"$logfile" 2>&1 &
-  demo_launch_pgid=$!
-  demo_pids+=($!)
+  pidfile="$(mktemp)"
+  # `setsid` forks when its caller already leads a process group, so $! is not
+  # necessarily the new group's leader. The shell inside setsid is: it records
+  # its own PID (= process group ID) and then becomes `ros2 launch`. In
+  # `bash -c script a b c`, a is $0 (the pid file) and b c are "$@".
+  setsid bash -c 'echo $$ >"$0"; exec ros2 launch "$@"' "$pidfile" "$@" >"$logfile" 2>&1 &
+  for _ in $(seq 1 50); do [[ -s "$pidfile" ]] && break; sleep 0.1; done
+  demo_launch_pgid="$(cat "$pidfile")"
+  rm -f -- "$pidfile"
 }
 
 # demo_stop_launch [timeout_s]: SIGINT to the launch group (nodes shut down
