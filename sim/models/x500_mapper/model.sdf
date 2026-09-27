@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  PX4's x500 plus one forward RGB-D camera for Phase 3 mapping.
+
+  Why not PX4's x500_depth: its OakD-Lite has a 1080p colour camera and a
+  640x480 depth camera with different fields of view. RTAB-Map's RGB-D mode
+  wants registered colour + depth, and rendering 1080p at 30 Hz through WSLg
+  slows the whole lockstep simulation. rgbd_camera renders both from one
+  viewpoint with one set of intrinsics.
+
+  The mount pose here is duplicated in quad_perception/config/sensors.yaml
+  (static TF base_link -> rgbd_link). Keep them identical.
+
+  PX4 flies this with the stock x500 airframe: the ID is in px4_airframe next
+  to this file. scripts/sim.sh spawns the model itself and lets PX4 attach to
+  it (PX4_GZ_MODEL_NAME), so PX4's tree needs no new airframe.
+-->
+<sdf version="1.9">
+  <model name="x500_mapper">
+    <include merge="true">
+      <uri>model://x500</uri>
+    </include>
+
+    <link name="rgbd_link">
+      <!-- 15 cm forward, 5 cm up, pitched 15 deg down (+pitch tilts +x down). -->
+      <pose relative_to="base_link">0.15 0 0.05 0 0.2618 0</pose>
+      <inertial>
+        <mass>0.05</mass>
+        <inertia>
+          <ixx>1e-5</ixx><iyy>1e-5</iyy><izz>1e-5</izz>
+          <ixy>0</ixy><ixz>0</ixz><iyz>0</iyz>
+        </inertia>
+      </inertial>
+      <visual name="body">
+        <geometry><box><size>0.03 0.09 0.03</size></box></geometry>
+        <material><diffuse>0.1 0.1 0.1 1</diffuse></material>
+      </visual>
+      <sensor name="rgbd" type="rgbd_camera">
+        <!-- Image data is in the ROS optical convention relative to this link
+             (z forward, x right, y down); the static TF names it rgbd_optical_frame. -->
+        <gz_frame_id>rgbd_optical_frame</gz_frame_id>
+        <topic>x500_mapper/rgbd</topic>
+        <update_rate>15</update_rate>
+        <always_on>1</always_on>
+        <camera>
+          <horizontal_fov>1.5</horizontal_fov>
+          <image>
+            <width>320</width>
+            <height>240</height>
+            <format>R8G8B8</format>
+          </image>
+          <clip>
+            <near>0.2</near>
+            <far>30</far>
+          </clip>
+          <depth_camera>
+            <clip>
+              <near>0.3</near>
+              <far>10</far>
+            </clip>
+          </depth_camera>
+        </camera>
+      </sensor>
+    </link>
+    <joint name="rgbd_joint" type="fixed">
+      <parent>base_link</parent>
+      <child>rgbd_link</child>
+    </joint>
+
+    <!-- SIMULATION-ONLY ground truth, for diagnosis: the true pose relative to
+         the start (odom -> base_link, ENU/FLU), stamped with the same clock as
+         the camera. Used only by `mapping.launch.py odom_source:=gt`, which
+         separates mapping errors from odometry errors. Never an input to
+         anything that would fly a real vehicle. -->
+    <plugin filename="gz-sim-odometry-publisher-system"
+            name="gz::sim::systems::OdometryPublisher">
+      <odom_frame>odom</odom_frame>
+      <robot_base_frame>base_link</robot_base_frame>
+      <odom_publish_frequency>100</odom_publish_frequency>
+      <odom_topic>x500_mapper/gt_odometry</odom_topic>
+      <tf_topic>x500_mapper/gt_tf</tf_topic>
+      <dimensions>3</dimensions>
+    </plugin>
+
+  </model>
+</sdf>
