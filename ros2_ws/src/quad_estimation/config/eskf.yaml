@@ -1,0 +1,39 @@
+eskf:
+  ros__parameters:
+    px4_namespace: ""
+
+    # Real-time budget: callbacks slower than this are counted as overruns.
+    # The IMU arrives every ~12 ms; 1 ms leaves a >10x margin.
+    imu_callback_budget_us: 1000
+    measurement_callback_budget_us: 200
+    sensor_thread_priority: 0          # >0 = SCHED_FIFO (needs rtprio; not available in WSL2)
+    publish_rate_hz: 50.0
+
+    # IMU noise (continuous-time densities) and bias random walks.
+    gravity: 9.80665
+    gyro_noise: 0.004                  # rad/s/sqrt(Hz)
+    accel_noise: 0.06                  # m/s^2/sqrt(Hz)
+    gyro_bias_walk: 1.0e-4             # rad/s^2/sqrt(Hz)
+    accel_bias_walk: 3.0e-3            # m/s^3/sqrt(Hz)
+
+    # Measurements.
+    range_noise: 0.05                  # m
+    # SITL-tuned for consistency (velocity NEES ~= 3 over a replayed flight):
+    # 3x the simulated sensor's measured white noise (0.013 rad/s), leaving
+    # margin for lever arm and ~1% scale error. For a real PMW3901-class
+    # sensor start from PX4's EKF2_OF_N_MIN (0.15).
+    flow_noise_best: 0.04              # rad/s at flow quality 255
+    flow_noise_worst: 0.5              # rad/s at flow quality 0   (PX4 EKF2_OF_N_MAX)
+    flow_min_quality: 1                # PX4 EKF2_OF_QMIN
+    # Measured: PX4's sensor_mag_sim gives ~3.3 deg (0.058 rad) heading noise per
+    # sample. Real magnetometers near motors are similar or worse.
+    heading_noise: 0.06                # rad
+    # Declination at the simulated world's origin (WMM, as used by PX4's
+    # sensor_mag_sim), measured against ground truth. On hardware: the site's.
+    mag_declination_deg: 3.54
+    gate_1dof: 16.0                    # NIS gate, 1-dof (~4 sigma)
+    gate_2dof: 25.0                    # NIS gate, 2-dof
+    min_hagl: 0.08                     # m
+    max_tilt_deg: 36.87                # no range/flow fusion beyond this tilt
+    max_measurement_delay_s: 0.3
+    alignment_samples: 100             # still IMU samples before initialising (~1.2 s)
