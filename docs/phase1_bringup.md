@@ -41,7 +41,7 @@ estimator's own pre-allocated state.
 
 ## Parameters
 
-PX4-side parameters are in `firmware/params/offboard_common.params`, each with its
+PX4-side parameters are in `firmware/params/common.params`, each with its
 reason. The node's parameters are in `quad_offboard/config/square_mission.yaml`.
 
 ## Verification checklist

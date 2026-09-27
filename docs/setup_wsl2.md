@@ -33,6 +33,15 @@ uXRCE-DDS client connected, check that `ROS_DOMAIN_ID` matches `UXRCE_DDS_DOM_ID
 refuses to arm ("Preflight Fail: No connection to the GCS") unless `NAV_DLL_ACT`
 is 0. `scripts/sim.sh` sets it. See docs/environment.md, issue 1.
 
+**`ros2` CLI calls fail with `!rclpy.ok()`.** The ROS 2 CLI daemon is stuck.
+Run `ros2 daemon stop`. The project scripts use `--no-daemon` and don't depend
+on it.
+
+**Estimator overruns its time budget.** Check that the workspace was built
+optimised. Both packages default to `RelWithDebInfo`, but an old build
+directory keeps its cached build type: `rm -rf ros2_ws/build/quad_estimation`
+and rebuild.
+
 **Stale Gazebo processes.** If a previous run was killed hard, a `gz sim` server
 may still hold the world, and PX4 will attach to it. Clean up with
 `pkill -f "gz sim"`.

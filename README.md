@@ -54,22 +54,22 @@ Each phase is a working milestone, tagged in git (`phase1-bringup`, `phase2-esti
 | Phase | Goal | Status |
 |---|---|---|
 | **1. Bring-up** | SITL + Gazebo + ROS 2 bridge; C++ offboard node flies a square | ✅ done, tag `phase1-bringup` |
-| **2. State estimation** | Hand-rolled C++20 EKF (IMU + optical flow/VIO), validated against ground truth, real-time discipline | ⏳ planned |
+| **2. State estimation** | Hand-rolled C++20 ESKF (IMU + optical flow + range + mag), validated against ground truth, real-time discipline | ✅ done, tag `phase2-estimation` |
 | **3. Perception + SLAM** | Depth camera or LiDAR on the x500, RTAB-Map mapping in a cluttered world | ⏳ planned |
 | **4. Autonomy loop** | Plan over the map (RRT*), fly it, replan around new obstacles | ⏳ planned |
 
 ## Repository layout
 
 ```
-firmware/        PX4 parameters we depend on (+ hardware transport example)
-sim/             Gazebo worlds and models (custom ones arrive in Phase 3)
+firmware/        PX4 parameters we depend on, and the small PX4 patches we apply
+sim/             Gazebo worlds and models (flow_field: textured ground for optical flow)
 ros2_ws/         colcon workspace
   src/quad_offboard/     Phase 1: offboard velocity control node (C++20)
-  src/quad_estimation/   Phase 2 (stub)
+  src/quad_estimation/   Phase 2: error-state EKF node + replay tool (C++20)
   src/quad_perception/   Phase 3 (stub)
   src/quad_planning/     Phase 4 (stub)
   src/external/          px4_msgs, px4_ros_com (fetched by setup, git-ignored)
-scripts/         setup, sim launcher, demos
+scripts/         setup, sim launcher, demos, evaluation / replay tooling
 docs/            architecture, per-phase design notes, setup details, verified versions
 ```
 
@@ -93,7 +93,8 @@ git clone <this repo> ~/projects/quad-autonomy-sim && cd ~/projects/quad-autonom
 # 3. PX4 v1.17.0 clone + PX4's ubuntu.sh (toolchain + Gazebo Harmonic).  [sudo]
 ./scripts/setup/02_install_px4_toolchain.sh
 # Open a new shell, then:
-# 4+5. Build PX4 SITL, Micro XRCE-DDS agent (~/.local), and ros2_ws.  [no sudo]
+# 4+5. Apply firmware/px4_patches, build PX4 SITL, the Micro XRCE-DDS
+#      agent (~/.local) and ros2_ws.                                [no sudo]
 ./scripts/setup/03_build_workspace.sh
 ```
 
@@ -149,20 +150,67 @@ source scripts/env.sh && ./scripts/demo_phase1.sh            # or --headless
 # -> logs/phase1_<timestamp>/{px4.log,node.log,track.csv,track.png}
 ```
 
-**Tests:** `cd ros2_ws && colcon test --packages-select quad_offboard && colcon test-result --verbose`
+**Tests:** `cd ros2_ws && colcon test --packages-select quad_offboard quad_estimation && colcon test-result --verbose`
 
 Design notes: [docs/phase1_bringup.md](docs/phase1_bringup.md).
 
-## Phase 2: State estimation (planned)
+## Phase 2: State estimation
 
-**What it will do.** A custom C++20 error-state EKF node that fuses the IMU with
-simulated optical flow and a range sensor (`gz_x500_flow`), and later with visual
-odometry. Its output is compared against Gazebo ground truth, with the error logged
-and plotted. It will have bounded-time callbacks, no heap allocation in the hot path,
-and an explicit callback-group and executor design, all documented.
-`robot_localization` may be added alongside it as a comparison baseline.
-Plan: [docs/phase2_state_estimation.md](docs/phase2_state_estimation.md) ·
-package stub: [ros2_ws/src/quad_estimation](ros2_ws/src/quad_estimation).
+**What it does.** `quad_estimation/eskf_node` is a hand-rolled C++20 error-state
+EKF. It fuses the IMU with downward optical flow, a downward rangefinder and
+magnetometer heading, all read from PX4 over uXRCE-DDS. It runs in shadow mode:
+PX4's EKF2 keeps flying the vehicle (the `x500_flow` airframe, no GPS, over the
+textured `flow_field` world), and our estimate is published on
+`/eskf/odometry_ned` (PX4 conventions) and `/eskf/odometry` (REP-103). Both
+estimators are scored against Gazebo ground truth.
+
+| validation flight (held-out path) | ESKF | PX4 EKF2 |
+|---|---|---|
+| horizontal position RMSE | 0.34 m | 0.48 m |
+| altitude RMSE | 0.011 m | 0.144 m |
+| velocity RMSE | 0.089 m/s | 0.088 m/s |
+| tilt / yaw RMSE | 0.64 / 0.59 deg | 0.08 / 1.26 deg |
+| IMU callback mean / p99 / max | 13.6 / 40 / 80 us, 0 overruns, 0 heap allocations | |
+
+Real-time design:
+- **Bounded time:** every callback does fixed-size work.
+- **No allocation in the hot path:** fixed-size Eigen, verified by the unit
+  tests and counted live.
+- **Explicit threads:** a sensor thread owns the filter; an output thread does
+  everything that allocates, and the hand-off between them never blocks.
+
+The design, the simulator issues found and fixed along the way (dropped IMU
+data, untextured ground, an unusable Gazebo magnetometer), the tuning method,
+and the known limitations (tilt trails EKF2) are in
+[docs/phase2_state_estimation.md](docs/phase2_state_estimation.md). Package
+details: [ros2_ws/src/quad_estimation](ros2_ws/src/quad_estimation).
+
+**How to run it.**
+
+```bash
+# terminal 1: flow airframe over the textured world
+source scripts/env.sh && ./scripts/sim.sh --model x500_flow --world flow_field
+# terminal 2: the estimator (keep the vehicle still ~2 s while it aligns)
+source scripts/env.sh
+ros2 run quad_estimation eskf_node --ros-args \
+  --params-file ros2_ws/src/quad_estimation/config/eskf.yaml
+# terminal 3: fly (Phase 1 node), then watch /eskf/odometry and /diagnostics
+source scripts/env.sh && ros2 run quad_offboard offboard_square --ros-args \
+  --params-file ros2_ws/src/quad_offboard/config/square_mission.yaml
+```
+
+**How to reproduce the demo** (flies, records, then scores against ground truth):
+
+```bash
+source scripts/env.sh && ./scripts/demo_phase2.sh --headless
+SQUARE_SIDE=12 ALTITUDE=4 SPEED=3 ./scripts/demo_phase2.sh --headless   # held-out path
+# -> logs/phase2_<ts>/{metrics.json, estimation.png, diagnostics.txt, raw CSVs}
+# Exit 0 only if the flight completed and the ESKF met the acceptance thresholds.
+```
+
+Every demo flight records the raw sensor inputs, so it can be re-run offline
+through the same estimator code with different parameters (`eskf_replay`; see
+the design doc).
 
 ## Phase 3: Perception + SLAM (planned)
 

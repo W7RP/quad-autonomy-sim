@@ -67,3 +67,42 @@ breaks after an upgrade, diff against this first.
 4. **`ros2 topic hz` on Humble has no `--qos-reliability` flag.** It isn't needed:
    `hz` matches PX4's best-effort publishers as-is. `ros2 topic echo` does take the
    flag.
+
+## Phase 2 additions (verified 2026-09-27)
+
+Same host and stack as above, plus:
+
+| Item | Value |
+|---|---|
+| PX4 source | `v1.17.0` + `firmware/px4_patches/0001` (extra uXRCE-DDS topics) + `0002` (gz_bridge defers to `sensor_mag_sim`) |
+| SITL airframe / world | `4021_gz_x500_flow` (optical flow + LW20 rangefinder, no GPS) / `sim/worlds/flow_field.sdf` |
+| Eigen | 3.4.0 (`libeigen3-dev`, pulled in by ROS 2 Humble) |
+| Simulated magnetometer | PX4 `sensor_mag_sim` (WMM): declination 3.54 deg at the world origin, about 3.3 deg heading noise per sample |
+| Simulated flow sensor (measured) | residual 0.013 rad/s against ground truth, scale 1.013, no measurable latency |
+
+| Check | Result |
+|---|---|
+| Unit tests (`quad_offboard`, `quad_estimation`) | 27 tests, 0 failures, 0 compiler warnings |
+| Phase 2 demo, 8 m square | pass: ESKF horizontal RMSE 0.156 m, velocity 0.070 m/s, yaw 0.36 deg; IMU callback 13.2 us mean, 138 us max, 0 overruns, 0 hot-path allocations |
+| Phase 2 demo, 12 m square at 3 m/s (held out) | pass: ESKF horizontal RMSE 0.343 m, velocity 0.089 m/s, yaw 0.59 deg; 13.6 us mean, 80 us max |
+| Phase 1 demo (regression, after all Phase 2 changes) | pass: 5.35 x 5.43 m square, same as the original verification |
+
+Issues hit during Phase 2, with details in docs/phase2_state_estimation.md
+("Simulator findings"):
+
+5. **IMU data dropped by the bridge.** Fixed with `IMU_INTEG_RATE 100`.
+6. **Optical flow unusable over flat grey ground.** Fixed with the textured
+   `flow_field` world.
+7. **Gazebo Harmonic magnetometer unusable in tilted flight.** Switched to PX4's
+   `sensor_mag_sim`. One intermediate fix (remapping Gazebo's axes) was correct
+   under tilt but broke GPS flights: the Phase 1 x500 toilet-bowled. It was
+   replaced, and the regression re-checked.
+8. **Magnetometer auto-calibration learned from bad data.** Turned off, with the
+   offsets pinned in SITL.
+9. **`EKF2_DECL_TYPE` semantics in v1.17.** Bit 1 is needed for
+   `EKF2_MAG_DECL` to be used at all.
+10. **Timesync clock steps of up to +8 s** when the simulator ran below real
+    time. Handled in the estimator and in the evaluation.
+11. **Tooling.** `ros2 run` orphaned background nodes; the ROS 2 CLI daemon got
+    stuck; an unoptimised build ran 27x slower. All fixed in the scripts and
+    CMake files.

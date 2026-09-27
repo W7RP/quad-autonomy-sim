@@ -32,6 +32,13 @@ release. Rules:
 - **Timestamps.** `timestamp` fields are in microseconds. The uXRCE-DDS client runs
   timesync with the agent, so companion-side timestamps from the ROS clock are
   accepted.
+- **Extra topics.** The estimator's inputs (optical flow, rangefinder,
+  magnetometer) and the SITL ground truth are not exported by stock PX4. They
+  are added by `firmware/px4_patches/0001-*`.
+- **Timesync artefacts.** Stamps can glitch (one sample in raw PX4 boot time) or
+  step (−0.3 s to +8 s; large steps when the simulator runs slower than real
+  time). Consumers integrate with PX4's own intervals, and accept a stamp jump
+  only once the next sample confirms it (see docs/phase2_state_estimation.md).
 - **Pinning.** `px4_msgs` must come from the branch that matches the PX4 release
   (`release/1.17` for `v1.17.0`). A mismatch compiles fine but silently breaks topic
   matching.
