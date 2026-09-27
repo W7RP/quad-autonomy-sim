@@ -1,0 +1,55 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Cell Size: 1
+      Plane Cell Count: 30
+      Enabled: true
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Enabled: true
+      Show Names: false
+      Marker Scale: 0.5
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Map cloud
+      Enabled: true
+      Topic:
+        Value: /rtabmap/cloud_map
+        Reliability Policy: Reliable
+        Durability Policy: Transient Local
+      Size (m): 0.05
+      Style: Boxes
+      Color Transformer: RGB8
+    - Class: rviz_default_plugins/Odometry
+      Name: Odometry
+      Enabled: true
+      Topic:
+        Value: /odom
+      Keep: 200
+      Shape:
+        Value: Arrow
+    - Class: rviz_default_plugins/Image
+      Name: Camera
+      Enabled: true
+      Topic:
+        Value: /camera/color/image_raw
+  Global Options:
+    Fixed Frame: map
+    Frame Rate: 30
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 25
+      Focal Point:
+        X: 5
+        Y: 5
+        Z: 0
+      Pitch: 0.9
+      Yaw: 3.9
+Window Geometry:
+  Width: 1400
+  Height: 900

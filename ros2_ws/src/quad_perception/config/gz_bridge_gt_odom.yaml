@@ -1,0 +1,12 @@
+# SIMULATION-ONLY: Gazebo ground-truth odometry as odom -> base_link, for the
+# mapping.launch.py odom_source:=gt diagnostic. See sim/models/x500_mapper.
+- ros_topic_name: /odom
+  gz_topic_name: /x500_mapper/gt_odometry
+  ros_type_name: nav_msgs/msg/Odometry
+  gz_type_name: gz.msgs.Odometry
+  direction: GZ_TO_ROS
+- ros_topic_name: /tf
+  gz_topic_name: /x500_mapper/gt_tf
+  ros_type_name: tf2_msgs/msg/TFMessage
+  gz_type_name: gz.msgs.Pose_V
+  direction: GZ_TO_ROS

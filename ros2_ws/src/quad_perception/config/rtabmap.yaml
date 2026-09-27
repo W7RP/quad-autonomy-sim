@@ -1,0 +1,37 @@
+# RTAB-Map (rtabmap_slam/rtabmap) for RGB-D mapping on a multirotor with
+# external odometry (PX4 EKF2 via px4_odometry_bridge, as TF odom -> base_link).
+# RTAB-Map's own parameters are strings in ROS 2.
+/**:  # only rtabmap loads this file
+  ros__parameters:
+    frame_id: base_link
+    odom_frame_id: odom            # odometry from TF, not a topic
+    map_frame_id: map
+    publish_tf: true               # map -> odom (loop-closure corrections)
+    subscribe_rgb: true
+    subscribe_depth: true
+    subscribe_odom_info: false
+    approx_sync: true              # colour and depth are separate Gazebo messages
+    approx_sync_max_interval: 0.02
+    sync_queue_size: 20
+    topic_queue_size: 20
+    wait_for_transform: 0.3        # [s] odometry TF may lag the images slightly
+    use_sim_time: true
+
+    Mem/IncrementalMemory: "true"  # mapping mode
+    Rtabmap/DetectionRate: "2"     # [Hz] add a map node at most 2x/s
+    RGBD/LinearUpdate: "0.2"       # [m] ...and only after moving this far
+    RGBD/AngularUpdate: "0.15"     # [rad] ...or turning this much
+    Reg/Force3DoF: "false"         # it flies: full 6-DoF constraints
+    Reg/Strategy: "0"              # visual registration for loop closures
+    Vis/MinInliers: "15"
+    RGBD/OptimizeMaxError: "3.0"   # reject loop closures that bend the graph too much
+    Optimizer/GravitySigma: "0.3"  # keep roll/pitch consistent with odometry
+
+    Grid/FromDepth: "true"
+    Grid/3D: "true"                # 3D occupancy (octomap) for Phase 4 planning
+    Grid/CellSize: "0.05"          # [m]
+    Grid/RangeMax: "8.0"           # [m] beyond this the depth is too sparse
+    Grid/RayTracing: "true"        # clear free space, not just mark obstacles
+    Grid/NormalsSegmentation: "false"  # a flying vehicle: ground is just another surface
+    Grid/MaxGroundHeight: "0.05"   # [m] points below this are ground
+    Grid/MaxObstacleHeight: "5.0"
