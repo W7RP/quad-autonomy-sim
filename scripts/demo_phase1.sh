@@ -2,44 +2,25 @@
 # Phase 1 demo, end to end: start sim, fly the square, land, save the track.
 #
 #   scripts/demo_phase1.sh              # with Gazebo GUI
-#   scripts/demo_phase1.sh --headless   # no GUI
+#   scripts/demo_phase1.sh --headless   # no GUI (extra args go to scripts/sim.sh)
 #
 # Output goes to logs/phase1_<timestamp>/ (px4.log, node.log, track.csv, track.png).
 # Exit code 0 only if the node reports the full mission completed and landed.
 set -euo pipefail
 source "$(dirname "$0")/env.sh"
+source "$REPO_ROOT/scripts/lib/demo_common.sh"
 
-sim_args=("$@")
-logdir="$REPO_ROOT/logs/phase1_$(date +%Y%m%d_%H%M%S)"
-mkdir -p "$logdir"
-export QUAD_LOG_DIR="$logdir"
-
-pids=()
-cleanup() {
-  # SIGTERM, not SIGINT: background jobs of a non-interactive shell ignore SIGINT.
-  for ((i=${#pids[@]}-1; i>=0; i--)); do kill "${pids[i]}" 2>/dev/null || true; done
-  wait 2>/dev/null || true
-}
-trap cleanup EXIT INT TERM
-
+demo_logdir phase1
+logdir="$QUAD_LOG_DIR"
+trap demo_cleanup EXIT INT TERM
 log "logs -> $logdir"
-# stdin from /dev/null puts PX4 in daemon mode (no pxh> console).
-"$REPO_ROOT/scripts/sim.sh" "${sim_args[@]}" </dev/null >"$logdir/px4.log" 2>&1 &
-pids+=($!)
 
-status_topic="/fmu/out/vehicle_status_v1"
-log "waiting for PX4 <-> ROS 2 bridge ($status_topic)"
-for _ in $(seq 1 90); do
-  if ros2 topic list 2>/dev/null | grep -qx "$status_topic"; then break; fi
-  kill -0 "${pids[0]}" 2>/dev/null || die "sim exited early, see $logdir/px4.log"
-  sleep 1
-done
-ros2 topic list 2>/dev/null | grep -qx "$status_topic" || die "bridge not up after 90 s, see $logdir/px4.log"
+demo_start_sim "$logdir" "$@"
+log "waiting for PX4 <-> ROS 2 bridge"
+demo_wait_for_message /fmu/out/vehicle_status_v1 px4_msgs/msg/VehicleStatus 90
 ok "bridge up"
 
-ros2 topic echo --csv --qos-reliability best_effort \
-  /fmu/out/vehicle_local_position_v1 px4_msgs/msg/VehicleLocalPosition >"$logdir/track.csv" &
-pids+=($!)
+demo_record /fmu/out/vehicle_local_position_v1 px4_msgs/msg/VehicleLocalPosition "$logdir/track.csv"
 
 log "flying square"
 set +e

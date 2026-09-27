@@ -81,6 +81,7 @@ public:
     side_m_ = declare_parameter<double>("square_side_m", 5.0);
     altitude_m_ = declare_parameter<double>("altitude_m", 3.0);
     const double rate_hz = declare_parameter<double>("control_rate_hz", 20.0);
+    px4_timeout_s_ = declare_parameter<double>("px4_timeout_s", 120.0);
     engage_timeout_s_ = declare_parameter<double>("engage_timeout_s", 20.0);
     shutdown_when_done_ = declare_parameter<bool>("shutdown_when_done", true);
 
@@ -127,6 +128,7 @@ public:
       std::chrono::duration_cast<std::chrono::nanoseconds>(period),
       [this]() {on_timer();}, group_);
 
+    phase_start_ = now();  // the first phase's timeout counts from startup
     RCLCPP_INFO(
       get_logger(), "square %.1f m at %.1f m AGL, %.0f Hz; listening on %s",
       side_m_, altitude_m_, rate_hz, status_sub_->get_topic_name());
@@ -173,6 +175,11 @@ private:
           follower_.set_route(square, heading_);
           hold_yaw_ = heading_;
           set_phase(Phase::kPrime);
+        } else if (seconds_in_phase() > px4_timeout_s_) {
+          RCLCPP_ERROR(get_logger(), "no valid PX4 status/local position within %.0f s "
+            "(status %s, position %s)", px4_timeout_s_, have_status_ ? "ok" : "missing",
+            pos_valid_ ? "valid" : "invalid");
+          set_phase(Phase::kAborted);
         }
         return;
 
@@ -284,6 +291,7 @@ private:
   // Configuration
   double side_m_{};
   double altitude_m_{};
+  double px4_timeout_s_{};
   double engage_timeout_s_{};
   bool shutdown_when_done_{};
 

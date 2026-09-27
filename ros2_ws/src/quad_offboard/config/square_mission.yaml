@@ -9,5 +9,6 @@ offboard_square:
     position_gain: 0.8
     acceptance_radius_m: 0.3
     acceptance_speed_mps: 0.3
+    px4_timeout_s: 120.0       # abort if PX4 never provides status + valid local position
     engage_timeout_s: 20.0
     shutdown_when_done: true
