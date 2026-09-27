@@ -306,9 +306,18 @@ private:
     }
   }
 
+  // Timestamp for messages sent TO PX4: 0 = "stamp on arrival". The uXRCE-DDS
+  // client converts a non-zero stamp with its timesync offset
+  // (min(stamp - offset, now)), and PX4 treats offboard setpoints older than
+  // COM_OF_LOSS_T (1 s) as lost. In SITL the simulation runs a few percent off
+  // real time, so between timesync corrections that offset goes stale: fresh
+  // setpoints arrived looking ~1 s old, and PX4 intermittently dropped to Hold
+  // mid-mission. With 0, freshness means arrival time, as it should.
+  static constexpr std::uint64_t kStampOnArrival = 0;
+
   void publish_velocity(const Vec3 & v_ned, double yaw)
   {
-    const auto stamp_us = static_cast<std::uint64_t>(now().nanoseconds() / 1000);
+    const auto stamp_us = kStampOnArrival;
 
     OffboardControlMode mode{};
     mode.timestamp = stamp_us;
@@ -331,7 +340,7 @@ private:
   void send_command(std::uint32_t command, float p1 = 0.0F, float p2 = 0.0F)
   {
     VehicleCommand cmd{};
-    cmd.timestamp = static_cast<std::uint64_t>(now().nanoseconds() / 1000);
+    cmd.timestamp = kStampOnArrival;
     cmd.command = command;
     cmd.param1 = p1;
     cmd.param2 = p2;
