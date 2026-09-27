@@ -6,3 +6,28 @@
 # NAV_DLL_ACT > 0 PX4 refuses to arm ("Preflight Fail: No connection to the GCS").
 # On hardware keep this enabled and fly with a GCS link.
 NAV_DLL_ACT 0
+
+# Magnetometer: PX4's own simulator (sensor_mag_sim: WMM field at the
+# ground-truth position, rotated by the ground-truth attitude) instead of
+# Gazebo Harmonic's, which is not usable in tilted flight; see
+# firmware/px4_patches/0002-* and docs/phase2_state_estimation.md.
+SENS_EN_MAGSIM 1
+
+# Magnetic declination [deg] for flights without GPS (EKF2 cannot look it up).
+# Must equal the WMM value sensor_mag_sim uses at the world origin; measured
+# against ground truth, see docs/phase2_state_estimation.md. On hardware: the
+# site's declination (or let EKF2 derive it from GPS).
+EKF2_MAG_DECL 3.54
+# Declination source. In PX4 v1.17 EKF2 only uses EKF2_MAG_DECL when bit 1
+# (SAVE_GEO_DECL) is set (mag_control.cpp, getMagDeclination); with 0 it uses a
+# declination of 0 regardless of EKF2_MAG_DECL. 2 = use EKF2_MAG_DECL.
+EKF2_DECL_TYPE 2
+
+# The simulated magnetometer has no hard-iron offset, but PX4 saves the mag
+# biases EKF2 "learns" into the calibration at every disarm (SENS_MAG_AUTOCAL).
+# Fed bad data once, that made every later flight worse; keep SITL
+# calibration at zero and fixed.
+SENS_MAG_AUTOCAL 0
+CAL_MAG0_XOFF 0.0
+CAL_MAG0_YOFF 0.0
+CAL_MAG0_ZOFF 0.0

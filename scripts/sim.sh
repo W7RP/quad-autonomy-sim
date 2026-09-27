@@ -3,7 +3,8 @@
 #
 #   scripts/sim.sh                 # GUI, default world, interactive pxh> console
 #   scripts/sim.sh --headless      # no Gazebo GUI (CI, or a slow GPU passthrough)
-#   scripts/sim.sh --world walls   # any world in PX4's Tools/simulation/gz/worlds
+#   scripts/sim.sh --world walls   # a world from sim/worlds, else PX4's gz/worlds
+#   scripts/sim.sh --model x500_flow --world flow_field   # Phase 2 setup
 #
 # Equivalent to `make px4_sitl gz_x500` plus the agent, but runs the already-built
 # binary directly (no rebuild check) and applies firmware/params/*.params.
@@ -22,7 +23,7 @@ while [[ $# -gt 0 ]]; do
     --headless) headless=1 ;;
     --world) world="$2"; shift ;;
     --model) model="$2"; shift ;;
-    -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
   shift
@@ -34,7 +35,7 @@ command -v MicroXRCEAgent >/dev/null || die "MicroXRCEAgent not found: run scrip
 
 # Project parameters: shared ones first, then SITL-only relaxations.
 project_params=()
-for params in offboard_common.params sitl_only.params; do
+for params in common.params sitl_only.params; do
   while read -r name value _; do
     [[ -z "$name" || "$name" == \#* ]] && continue
     project_params+=("$name=$value")
@@ -88,17 +89,38 @@ export PX4_GZ_WORLD="$world"
 export GZ_IP=127.0.0.1
 ((headless)) && export HEADLESS=1
 
-log "starting PX4 SITL ($PX4_SIM_MODEL, world=$world, headless=$headless)"
-cd "$PX4_DIR/build/px4_sitl_default/rootfs"
+# One working directory per model. PX4 keeps parameters, dataman and logs in its
+# working directory; sharing one between airframes makes every model switch a
+# SYS_AUTOSTART change, which triggers a parameter auto-reset. On the first boot
+# after 4001 -> 4021 (x500 -> x500_flow) that left the IMU pipeline dead
+# ("ekf2 missing data") until PX4 was restarted.
+workdir="${QUAD_SITL_STATE_DIR:-$HOME/.local/state/quad-autonomy-sim/sitl}/$model"
+mkdir -p "$workdir"
+# px4-rc.gzsim only finds gz_env.sh relative to its CWD (the build's rootfs),
+# so export the Gazebo resource/plugin paths ourselves.
+set +u  # gz_env.sh appends to possibly-unset GZ_* variables
+# shellcheck disable=SC1091
+source "$PX4_DIR/build/px4_sitl_default/rootfs/gz_env.sh"
+set -u
+# Project models are always on the resource path; a world in sim/worlds takes
+# precedence over a PX4 world of the same name. This works because our working
+# directory has no gz_env.sh for px4-rc.gzsim to re-source over these values.
+export GZ_SIM_RESOURCE_PATH="$REPO_ROOT/sim/models:$REPO_ROOT/sim/worlds:$GZ_SIM_RESOURCE_PATH"
+if [[ -f "$REPO_ROOT/sim/worlds/$world.sdf" ]]; then
+  export PX4_GZ_WORLDS="$REPO_ROOT/sim/worlds"
+fi
+
+log "starting PX4 SITL ($PX4_SIM_MODEL, world=$world, headless=$headless, state=$workdir)"
+cd "$workdir"
 apply_params_post_boot >&2 &
 pids+=($!)
 if [[ -t 0 ]]; then
-  "$px4_bin"          # interactive pxh> console; Ctrl+C reaches the whole group
+  "$px4_bin" "$PX4_DIR/build/px4_sitl_default/etc"   # interactive pxh> console
 else
   # Daemon mode when not attached to a terminal (demo scripts, CI). Run it in the
   # background and `wait`, so a SIGTERM to this script runs cleanup() immediately
   # instead of being deferred until PX4 exits on its own.
-  "$px4_bin" -d &
+  "$px4_bin" -d "$PX4_DIR/build/px4_sitl_default/etc" &
   pids+=($!)
   wait "$!"
 fi

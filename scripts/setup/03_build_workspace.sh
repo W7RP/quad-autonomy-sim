@@ -11,6 +11,18 @@ command -v gz >/dev/null || die "Gazebo missing: run 02_install_px4_toolchain.sh
 jobs="${JOBS:-$(nproc)}"
 
 # --- PX4 SITL ------------------------------------------------------------------
+# Project patches to PX4 (firmware/px4_patches, see its README). Idempotent:
+# a patch that already reverse-applies cleanly is already in the tree.
+for patch in "$REPO_ROOT"/firmware/px4_patches/*.patch; do
+  name="$(basename "$patch")"
+  if git -C "$PX4_DIR" apply --reverse --check "$patch" 2>/dev/null; then
+    ok "PX4 patch already applied: $name"
+  else
+    git -C "$PX4_DIR" apply "$patch" || die "PX4 patch does not apply: $name (PX4 version changed?)"
+    ok "applied PX4 patch: $name"
+  fi
+done
+
 log "Building PX4 SITL ($(git -C "$PX4_DIR" describe --tags --always))"
 make -C "$PX4_DIR" px4_sitl -j"$jobs"
 ok "PX4 SITL built: $PX4_DIR/build/px4_sitl_default/bin/px4"

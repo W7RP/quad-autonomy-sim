@@ -1,0 +1,34 @@
+diff --git a/src/modules/simulation/gz_bridge/GZBridge.cpp b/src/modules/simulation/gz_bridge/GZBridge.cpp
+index 3ef65e186f..2843d0ef85 100644
+--- a/src/modules/simulation/gz_bridge/GZBridge.cpp
++++ b/src/modules/simulation/gz_bridge/GZBridge.cpp
+@@ -36,6 +36,7 @@
+ #include <uORB/Subscription.hpp>
+ 
+ #include <lib/atmosphere/atmosphere.h>
++#include <lib/parameters/param.h>
+ #include <lib/mathlib/mathlib.h>
+ 
+ #include <px4_platform_common/getopt.h>
+@@ -227,6 +228,21 @@ bool GZBridge::subscribeImu(bool required)
+ 
+ bool GZBridge::subscribeMag(bool required)
+ {
++	// quad-autonomy-sim: with SENS_EN_MAGSIM=1, sensor_mag_sim provides the
++	// magnetometer (WMM field at the ground-truth position, rotated by the
++	// ground-truth attitude), so skip Gazebo's. Gazebo Harmonic's magnetometer
++	// is not usable for tilted flight: with the mapping below its output is
++	// only consistent while level, and read with a tilt-consistent mapping its
++	// field points ~90 deg away from the WMM field EKF2 expects, which made
++	// GPS flights toilet-bowl (docs/phase2_state_estimation.md).
++	int32_t mag_sim = 0;
++	const param_t mag_sim_handle = param_find("SENS_EN_MAGSIM");
++
++	if (mag_sim_handle != PARAM_INVALID && param_get(mag_sim_handle, &mag_sim) == PX4_OK && mag_sim == 1) {
++		PX4_INFO("SENS_EN_MAGSIM=1: using sensor_mag_sim instead of the Gazebo magnetometer");
++		return true;
++	}
++
+ 	std::string mag_topic = "/world/" + _world_name + "/model/" + _model_name +
+ 				"/link/base_link/sensor/magnetometer_sensor/magnetometer";
+ 

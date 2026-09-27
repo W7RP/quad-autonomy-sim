@@ -17,3 +17,11 @@ COM_OBL_RC_ACT 5
 COM_DISARM_LAND 2.0
 # DDS domain the uXRCE-DDS client joins; must match ROS_DOMAIN_ID on the ROS 2 side.
 UXRCE_DDS_DOM_ID 0
+
+# IMU integration rate for vehicle_imu -> sensor_combined (Hz). Default 250 Hz
+# in SITL, but the uXRCE-DDS client forwards sensor_combined at ~100 Hz and
+# sends only the latest sample, so ~60% of IMU intervals never reached ROS 2
+# (4 ms integrals arriving every ~10 ms). At 100 Hz each message covers its whole
+# interval. EKF2 predicts at 100 Hz anyway (EKF2_PREDICT_US), and rate/attitude
+# control uses vehicle_angular_velocity, which this does not affect.
+IMU_INTEG_RATE 100

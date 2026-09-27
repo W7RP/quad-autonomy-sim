@@ -1,0 +1,31 @@
+diff --git a/src/modules/uxrce_dds_client/dds_topics.yaml b/src/modules/uxrce_dds_client/dds_topics.yaml
+index 7cc39d199c..9cbb61c13b 100644
+--- a/src/modules/uxrce_dds_client/dds_topics.yaml
++++ b/src/modules/uxrce_dds_client/dds_topics.yaml
+@@ -46,6 +46,26 @@ publications:
+   - topic: /fmu/out/sensor_combined
+     type: px4_msgs::msg::SensorCombined
+ 
++  # --- quad-autonomy-sim (Phase 2 state estimation) ---------------------------
++  # Raw sensor inputs for the companion-side estimator, and simulator ground
++  # truth for evaluating it. The *_groundtruth topics exist only in SITL (they
++  # are published by gz_bridge); on hardware they are simply never sent.
++  - topic: /fmu/out/sensor_optical_flow
++    type: px4_msgs::msg::SensorOpticalFlow
++
++  - topic: /fmu/out/distance_sensor
++    type: px4_msgs::msg::DistanceSensor
++
++  - topic: /fmu/out/vehicle_magnetometer
++    type: px4_msgs::msg::VehicleMagnetometer
++
++  - topic: /fmu/out/vehicle_local_position_groundtruth
++    type: px4_msgs::msg::VehicleLocalPosition
++
++  - topic: /fmu/out/vehicle_attitude_groundtruth
++    type: px4_msgs::msg::VehicleAttitude
++  # --- end quad-autonomy-sim --------------------------------------------------
++
+   - topic: /fmu/out/timesync_status
+     type: px4_msgs::msg::TimesyncStatus
+     rate_limit: 10.
