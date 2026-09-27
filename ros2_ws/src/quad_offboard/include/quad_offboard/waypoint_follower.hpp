@@ -54,6 +54,9 @@ public:
   // Replace the route. Returns false (and leaves the route untouched) when the
   // input is empty or longer than kMaxWaypoints.
   bool set_route(std::span<const Vec3> waypoints_ned, double yaw_rad) noexcept;
+  // Same, with a yaw per waypoint (held while flying towards that waypoint).
+  // yaws_rad must have the same length as waypoints_ned.
+  bool set_route(std::span<const Vec3> waypoints_ned, std::span<const double> yaws_rad) noexcept;
 
   // Advance to the next waypoint if the current one is reached, then return the
   // velocity command toward it. std::nullopt once the route is finished.
@@ -67,14 +70,28 @@ public:
 private:
   FollowerConfig config_;
   std::array<Vec3, kMaxWaypoints> route_{};
+  std::array<double, kMaxWaypoints> yaw_{};
   std::size_t count_{0};
   std::size_t active_{0};
-  double yaw_rad_{0.0};
 };
 
 // Closed square of side `side_m` at `altitude_m` above the start point, with
 // its first corner at `origin_ned`. Includes the return to the first corner.
 [[nodiscard]] std::array<Vec3, 5> make_square(
   const Vec3 & origin_ned, double side_m, double altitude_m) noexcept;
+
+// "Face the direction of travel": the yaw for waypoint i is the horizontal
+// heading of the leg arriving at it. Legs shorter than min_leg_m (e.g. the
+// vertical climb) keep the previous yaw; the first waypoint uses initial_yaw.
+// Writes route.size() values into yaws_out.
+// Move `current` towards `target` by at most `max_step` (radians), the short
+// way round, and return the result wrapped to [-pi, pi]. max_step <= 0 means
+// "jump straight to target". Used to rate-limit yaw setpoints: PX4 otherwise
+// turns as fast as it can (144 deg/s measured), smearing mapping data.
+[[nodiscard]] double step_yaw(double current, double target, double max_step) noexcept;
+
+void travel_yaws(
+  std::span<const Vec3> route_ned, double initial_yaw_rad, std::span<double> yaws_out,
+  double min_leg_m = 0.5) noexcept;
 
 }  // namespace quad_offboard

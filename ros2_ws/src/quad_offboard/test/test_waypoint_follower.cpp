@@ -92,3 +92,44 @@ TEST(WaypointFollower, FliesSquareToCompletion)
   const Vec3 err{pos.x - 0.0, pos.y - 0.0, pos.z + 3.0};
   EXPECT_LT(quad_offboard::norm(err), FollowerConfig{}.acceptance_radius_m);
 }
+
+TEST(WaypointFollower, PerWaypointYaw)
+{
+  WaypointFollower f{FollowerConfig{}};
+  const std::vector<Vec3> route{{0.0, 0.0, -2.0}, {5.0, 0.0, -2.0}};
+  const std::vector<double> yaws{0.1, 0.7};
+  ASSERT_FALSE(f.set_route(route, std::vector<double>{0.1}));  // length mismatch
+  ASSERT_TRUE(f.set_route(route, yaws));
+  EXPECT_DOUBLE_EQ(f.step({0.0, 0.0, 0.0}, {}).value().yaw_rad, 0.1);
+  (void)f.step({0.0, 0.0, -2.0}, {});  // reach the first waypoint
+  EXPECT_DOUBLE_EQ(f.step({0.0, 0.0, -2.0}, {}).value().yaw_rad, 0.7);
+}
+
+TEST(TravelYaws, FacesEachLegAndHoldsThroughClimb)
+{
+  // climb, then east, then north, then west (NED: x north, y east)
+  const std::vector<Vec3> route{{0, 0, -2}, {0, 10, -2}, {10, 10, -2}, {10, 0, -2}};
+  std::vector<double> yaws(route.size());
+  quad_offboard::travel_yaws(route, 1.0, yaws);
+  EXPECT_DOUBLE_EQ(yaws[0], 1.0);                 // climb keeps the initial heading
+  EXPECT_NEAR(yaws[1], M_PI / 2, 1e-12);          // east
+  EXPECT_NEAR(yaws[2], 0.0, 1e-12);               // north
+  EXPECT_NEAR(std::abs(yaws[3]), M_PI / 2, 1e-12);
+  EXPECT_LT(yaws[3], 0.0);                        // west
+}
+
+TEST(StepYaw, RateLimitedShortestWay)
+{
+  using quad_offboard::step_yaw;
+  EXPECT_DOUBLE_EQ(step_yaw(0.0, 1.0, 0.0), 1.0);             // unlimited: jump
+  EXPECT_NEAR(step_yaw(0.0, 1.0, 0.1), 0.1, 1e-12);            // limited
+  EXPECT_NEAR(step_yaw(0.95, 1.0, 0.1), 1.0, 1e-12);           // no overshoot
+  // 170 deg -> -170 deg is a 20 deg turn through 180, not 340 the long way.
+  const double from = M_PI * 170 / 180, to = -M_PI * 170 / 180;
+  EXPECT_NEAR(step_yaw(from, to, 0.1), std::remainder(from + 0.1, 2 * M_PI), 1e-12);
+  double y = from;
+  for (int i = 0; i < 10; ++i) {
+    y = step_yaw(y, to, 0.1);
+  }
+  EXPECT_NEAR(y, to, 1e-12);
+}

@@ -1,4 +1,6 @@
-// Phase 1 offboard node: take off, fly a square with velocity setpoints, land.
+// Offboard node: take off, fly a route with velocity setpoints, land. The route
+// is the Phase 1 square by default, or any waypoint list (route_nea, laps),
+// optionally yawing to face the direction of travel (Phase 3 mapping flights).
 //
 // Talks to PX4 only through the uXRCE-DDS /fmu/{in,out} topics, so the same node
 // runs unchanged against SITL or a real Pixhawk connected to a companion
@@ -22,7 +24,9 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <string>
 #include <string_view>
+#include <vector>
 
 #include <rclcpp/rclcpp.hpp>
 
@@ -81,6 +85,19 @@ public:
     side_m_ = declare_parameter<double>("square_side_m", 5.0);
     altitude_m_ = declare_parameter<double>("altitude_m", 3.0);
     const double rate_hz = declare_parameter<double>("control_rate_hz", 20.0);
+    // Optional route: flat [north, east, altitude, ...] triples in metres,
+    // relative to the start position (altitude above it). Empty = the square.
+    route_nea_ = declare_parameter<std::vector<double>>("route_nea", std::vector<double>{});
+    laps_ = static_cast<int>(declare_parameter<int>("laps", 1));
+    const auto yaw_mode = declare_parameter<std::string>("yaw_mode", "hold");
+    if (route_nea_.size() % 3 != 0 || laps_ < 1) {
+      throw std::invalid_argument("route_nea must hold north/east/altitude triples and laps >= 1");
+    }
+    if (yaw_mode != "hold" && yaw_mode != "travel") {
+      throw std::invalid_argument("yaw_mode must be 'hold' or 'travel'");
+    }
+    face_travel_ = yaw_mode == "travel";
+    max_yaw_rate_ = declare_parameter<double>("max_yaw_rate_dps", 0.0) * M_PI / 180.0;
     px4_timeout_s_ = declare_parameter<double>("px4_timeout_s", 120.0);
     engage_timeout_s_ = declare_parameter<double>("engage_timeout_s", 20.0);
     shutdown_when_done_ = declare_parameter<bool>("shutdown_when_done", true);
@@ -123,15 +140,17 @@ public:
     command_pub_ = create_publisher<VehicleCommand>(
       px4_topic<VehicleCommand>(ns, "/fmu/in/vehicle_command"), 10);
 
-    const auto period = std::chrono::duration<double>(1.0 / rate_hz);
+    control_dt_ = 1.0 / rate_hz;
+    const auto period = std::chrono::duration<double>(control_dt_);
     timer_ = create_wall_timer(
       std::chrono::duration_cast<std::chrono::nanoseconds>(period),
       [this]() {on_timer();}, group_);
 
     phase_start_ = now();  // the first phase's timeout counts from startup
     RCLCPP_INFO(
-      get_logger(), "square %.1f m at %.1f m AGL, %.0f Hz; listening on %s",
-      side_m_, altitude_m_, rate_hz, status_sub_->get_topic_name());
+      get_logger(), "%s, %.0f Hz; listening on %s",
+      route_nea_.empty() ? "square route" : "custom route", rate_hz,
+      status_sub_->get_topic_name());
   }
 
   [[nodiscard]] Phase phase() const {return phase_;}
@@ -147,6 +166,37 @@ private:
     c.acceptance_speed_mps =
       declare_parameter<double>("acceptance_speed_mps", c.acceptance_speed_mps);
     return c;
+  }
+
+  // Build the route once, before the vehicle moves (allocation here is fine:
+  // it is not the control loop). Waypoints are NED, anchored at the start.
+  bool load_route()
+  {
+    std::vector<Vec3> wps;
+    if (route_nea_.empty()) {
+      const auto square = make_square(pos_, side_m_, altitude_m_);
+      wps.assign(square.begin(), square.end());
+    } else {
+      wps.push_back({pos_.x, pos_.y, pos_.z - route_nea_[2]});  // climb in place first
+      for (int lap = 0; lap < laps_; ++lap) {
+        for (std::size_t i = 0; i < route_nea_.size(); i += 3) {
+          wps.push_back({pos_.x + route_nea_[i], pos_.y + route_nea_[i + 1],
+              pos_.z - route_nea_[i + 2]});
+        }
+      }
+    }
+    std::vector<double> yaws(wps.size(), heading_);
+    if (face_travel_) {
+      travel_yaws(wps, heading_, yaws);
+    }
+    if (!follower_.set_route(wps, yaws)) {
+      RCLCPP_ERROR(get_logger(), "route rejected: %zu waypoints (max %zu)", wps.size(),
+        WaypointFollower::kMaxWaypoints);
+      return false;
+    }
+    RCLCPP_INFO(get_logger(), "route: %zu waypoints, yaw %s", wps.size(),
+      face_travel_ ? "facing travel" : "held");
+    return true;
   }
 
   void set_phase(Phase next)
@@ -171,9 +221,12 @@ private:
       case Phase::kWaitForPx4:
         if (have_status_ && pos_valid_) {
           // Route is anchored at wherever the vehicle is sitting when PX4 is ready.
-          const auto square = make_square(pos_, side_m_, altitude_m_);
-          follower_.set_route(square, heading_);
+          if (!load_route()) {
+            set_phase(Phase::kAborted);
+            return;
+          }
           hold_yaw_ = heading_;
+          yaw_setpoint_ = heading_;
           set_phase(Phase::kPrime);
         } else if (seconds_in_phase() > px4_timeout_s_) {
           RCLCPP_ERROR(get_logger(), "no valid PX4 status/local position within %.0f s "
@@ -229,7 +282,9 @@ private:
             set_phase(Phase::kLand);
             return;
           }
-          publish_velocity(cmd->velocity_ned, cmd->yaw_rad);
+          // Rate-limit the yaw setpoint (max_yaw_rate_dps; 0 = unlimited).
+          yaw_setpoint_ = step_yaw(yaw_setpoint_, cmd->yaw_rad, max_yaw_rate_ * control_dt_);
+          publish_velocity(cmd->velocity_ned, yaw_setpoint_);
           return;
         }
 
@@ -291,6 +346,12 @@ private:
   // Configuration
   double side_m_{};
   double altitude_m_{};
+  std::vector<double> route_nea_;
+  int laps_{1};
+  bool face_travel_{false};
+  double max_yaw_rate_{0.0};   // [rad/s], 0 = unlimited
+  double control_dt_{0.05};
+  double yaw_setpoint_{0.0};
   double px4_timeout_s_{};
   double engage_timeout_s_{};
   bool shutdown_when_done_{};

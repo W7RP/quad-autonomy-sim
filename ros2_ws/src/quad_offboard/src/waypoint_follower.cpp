@@ -20,9 +20,24 @@ bool WaypointFollower::set_route(std::span<const Vec3> waypoints_ned, double yaw
     return false;
   }
   std::copy(waypoints_ned.begin(), waypoints_ned.end(), route_.begin());
+  std::fill(yaw_.begin(), yaw_.begin() + static_cast<std::ptrdiff_t>(waypoints_ned.size()), yaw_rad);
   count_ = waypoints_ned.size();
   active_ = 0;
-  yaw_rad_ = yaw_rad;
+  return true;
+}
+
+bool WaypointFollower::set_route(
+  std::span<const Vec3> waypoints_ned, std::span<const double> yaws_rad) noexcept
+{
+  if (waypoints_ned.empty() || waypoints_ned.size() > kMaxWaypoints ||
+    yaws_rad.size() != waypoints_ned.size())
+  {
+    return false;
+  }
+  std::copy(waypoints_ned.begin(), waypoints_ned.end(), route_.begin());
+  std::copy(yaws_rad.begin(), yaws_rad.end(), yaw_.begin());
+  count_ = waypoints_ned.size();
+  active_ = 0;
   return true;
 }
 
@@ -60,7 +75,31 @@ std::optional<VelocityCommand> WaypointFollower::step(
   }
   v.z = std::clamp(v.z, -config_.vertical_speed_mps, config_.vertical_speed_mps);
 
-  return VelocityCommand{v, yaw_rad_};
+  return VelocityCommand{v, yaw_[active_]};
+}
+
+double step_yaw(double current, double target, double max_step) noexcept
+{
+  const double diff = std::remainder(target - current, 2.0 * M_PI);  // shortest, in [-pi, pi]
+  const double step = (max_step <= 0.0) ? diff : std::clamp(diff, -max_step, max_step);
+  return std::remainder(current + step, 2.0 * M_PI);
+}
+
+void travel_yaws(
+  std::span<const Vec3> route_ned, double initial_yaw_rad, std::span<double> yaws_out,
+  double min_leg_m) noexcept
+{
+  double yaw = initial_yaw_rad;
+  for (std::size_t i = 0; i < route_ned.size() && i < yaws_out.size(); ++i) {
+    if (i > 0) {
+      const double dn = route_ned[i].x - route_ned[i - 1].x;
+      const double de = route_ned[i].y - route_ned[i - 1].y;
+      if (std::hypot(dn, de) >= min_leg_m) {
+        yaw = std::atan2(de, dn);  // NED: heading measured from north towards east
+      }
+    }
+    yaws_out[i] = yaw;
+  }
 }
 
 std::array<Vec3, 5> make_square(const Vec3 & origin_ned, double side_m, double altitude_m) noexcept
