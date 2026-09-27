@@ -1,13 +1,16 @@
 # sim/
 
-Gazebo Harmonic worlds and models owned by this project.
+Gazebo Harmonic worlds and models owned by this project. `scripts/sim.sh --world
+<name>` looks in `sim/worlds` first, then in PX4's `Tools/simulation/gz/worlds`;
+`sim/models` is always on Gazebo's resource path.
 
-- **Phase 1–2** use PX4's stock `default` world and the stock `x500` or
-  `x500_flow` models from `PX4-Autopilot/Tools/simulation/gz`. Nothing custom is
-  needed yet.
-- **Phase 3** adds `worlds/cluttered.sdf`, and possibly a model variant with a
-  depth camera or LiDAR, in `models/`.
-- **Phase 4** adds `worlds/demo_final.sdf` with movable obstacles.
+| World / model | Used by | What |
+|---|---|---|
+| PX4's `default` + `x500` | Phase 1 | stock |
+| `worlds/flow_field.sdf` + `models/flow_ground` + PX4's `x500_flow` | Phase 2 | PX4's default world with the grey ground replaced by a tiled, high-contrast texture. The simulated optical-flow sensor is a real camera plus OpenCV feature tracking; over the flat grey ground PX4's own EKF2 diverged by 70 m. |
+| `worlds/cluttered.sdf` (planned) | Phase 3 | obstacles for mapping |
+| `worlds/demo_final.sdf` (planned) | Phase 4 | movable obstacles |
 
-Custom worlds are started with `gz sim` first. PX4 then attaches to the running
-world (`px4-rc.gzsim` detects it), so PX4's own tree stays unmodified.
+The ground texture is generated, not drawn: `tools/generate_ground_texture.py`
+(seeded, so reproducible; seamless, multi-scale). Custom worlds keep PX4's
+default physics, lighting and geodetic origin, so results stay comparable.

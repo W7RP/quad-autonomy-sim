@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sdf version="1.9">
+  <!-- Visual only: collision comes from the world's infinite ground plane. The
+       mesh sits 1 mm above it to avoid z-fighting with anything drawn at z=0. -->
+  <model name="flow_ground">
+    <static>true</static>
+    <link name="link">
+      <visual name="visual">
+        <pose>0 0 0.001 0 0 0</pose>
+        <geometry>
+          <mesh>
+            <uri>model://flow_ground/meshes/ground.obj</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <diffuse>1 1 1 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>model://flow_ground/materials/textures/flow_ground.png</albedo_map>
+              <roughness>0.9</roughness>
+              <metalness>0.0</metalness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+    </link>
+  </model>
+</sdf>
