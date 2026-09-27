@@ -19,6 +19,9 @@ Final runs of `scripts/demo_phase3.sh --headless` (two laps of a 10 m square at
   link in both directions).
 - RTAB-Map's update took 177 ms median (342 ms max) against its 500 ms budget
   (2 Hz).
+- With the Gazebo GUI open (after the offboard timestamp fix, see "Findings"):
+  3/3 runs passed, with median errors of 4.7, 4.8 and 6.4 cm and 97-98 % of
+  points within 20 cm.
 - Run-to-run variation is real. EKF2's odometry differs every flight, and an
   earlier EKF2 run scored 4.9 cm median, but that run shared the machine with a
   stale Gazebo server (see "Findings"), so only the clean runs above are
@@ -149,6 +152,7 @@ same setup; the conclusions were not re-verified on clean runs.
 | `rtabmap-export --cloud` appends `_cloud` to the output name, and the default `--max_range` of 4 m silently trims the map | first run "exported nothing"; range default read from `--help` | demo renames the file and passes `--max_range 8` (matches `Grid/RangeMax`) |
 | PCL-written PLY files carry a `camera` element after the vertices | parser read the wrong record size | parser tracks elements; regression-tested with that exact layout |
 | "face travel" turns at up to **144 deg/s** at corners | truth heading rate | added `max_yaw_rate_dps` and tested 30 deg/s: no accuracy gain (median 4.1 vs 3.6 cm), and coverage of interior obstacles collapsed (36 % to 5-7 %). The demo keeps unlimited yaw; the fast corner sweep is what shows the forward camera the loop's interior. |
+| **With the Gazebo GUI open, PX4 dropped to Hold at waypoint 4, every time** (reported by the user; reproduced). It was not the battery (a "battery warning" tone was incidental), not a slow simulation (real-time factor ~1.0), and not our node (1,369 setpoints, every gap 52 ms). PX4 flagged `offboard_control_signal_lost` with velocity still valid, so the setpoints *looked* older than `COM_OF_LOSS_T` (1 s). The uXRCE-DDS client converts incoming stamps with its timesync offset, which goes stale between corrections while the simulation runs a few percent off real time. The flag flickered right at the 1 s boundary before it stuck. | PX4's generated deserialiser: a stamp of 0 means "stamp on arrival" | the offboard node sends timestamp 0 on everything it sends to PX4. GUI demo: 0/3 passes before, 3/3 after (map medians 4.7, 4.8, 6.4 cm); Phases 1-2 re-verified. |
 | **A stale Gazebo server contaminated runs.** An orphaned `gz sim` server (from a manual check where the kill was not verified) survived SIGTERM, and kept rendering and simulating next to later sessions of the same world. | it was still alive 35 min later and only died to SIGKILL; a Phase 2 regression run failed (PX4 failsafe land) while it ran | `sim.sh` refuses to start while any Gazebo simulation is running, and escalates to SIGKILL on exit; the demos sweep leftovers. Every affected result was re-run clean (the numbers above). |
 | RTAB-Map's `Kp/MaxFeatures=-1` in `rtabmap-reprocess` still reported loop detections | reprocess log | stopped investigating; the ground-truth-odometry test answered the underlying question directly |
 

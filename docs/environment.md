@@ -127,3 +127,9 @@ Issue hit during Phase 3: 12. **An orphaned Gazebo server ignored SIGTERM** and
 contaminated later runs. `sim.sh` now refuses to start while any Gazebo is
 running and escalates to SIGKILL; affected results were re-run.
 | RGB-D rendering headless on WSLg | 15 Hz colour + depth; real-time factor 0.9997 with the camera rendering (measured before flight) |
+
+Issue found after the Phase 3 tag, reported by the user: 13. **With the Gazebo
+GUI open, PX4 dropped to Hold mid-route on every run.** Offboard setpoint stamps,
+converted with a stale timesync offset, looked more than `COM_OF_LOSS_T` old.
+Fixed by sending timestamp 0 (stamp on arrival). GUI demo: 3/3 passes after,
+0/3 before; Phases 1 and 2 and 34 unit tests re-verified.

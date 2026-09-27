@@ -37,9 +37,12 @@ release. Rules:
 - **Frames.** PX4 uses NED for the local frame and FRD for the body frame. Anything
   republished to the wider ROS graph uses ENU/FLU (REP-103). Conversions happen once,
   at the boundary node.
-- **Timestamps.** `timestamp` fields are in microseconds. The uXRCE-DDS client runs
-  timesync with the agent, so companion-side timestamps from the ROS clock are
-  accepted.
+- **Timestamps.** `timestamp` fields are in microseconds. Messages sent **to** PX4
+  (`/fmu/in/*`) carry `timestamp = 0`, which PX4 replaces with its own time on
+  arrival. A non-zero stamp is converted with the uXRCE-DDS timesync offset.
+  In SITL, where the simulation runs a few percent off real time, that offset
+  goes stale between corrections: fresh offboard setpoints looked ~1 s old, and
+  PX4 dropped to Hold mid-mission (docs/phase3_perception_slam.md).
 - **Extra topics.** The estimator's inputs (optical flow, rangefinder,
   magnetometer) and the SITL ground truth are not exported by stock PX4. They
   are added by `firmware/px4_patches/0001-*`.
