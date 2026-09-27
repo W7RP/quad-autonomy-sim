@@ -55,18 +55,18 @@ Each phase is a working milestone, tagged in git (`phase1-bringup`, `phase2-esti
 |---|---|---|
 | **1. Bring-up** | SITL + Gazebo + ROS 2 bridge; C++ offboard node flies a square | ✅ done, tag `phase1-bringup` |
 | **2. State estimation** | Hand-rolled C++20 ESKF (IMU + optical flow + range + mag), validated against ground truth, real-time discipline | ✅ done, tag `phase2-estimation` |
-| **3. Perception + SLAM** | Depth camera or LiDAR on the x500, RTAB-Map mapping in a cluttered world | ⏳ planned |
+| **3. Perception + SLAM** | RGB-D camera on the x500, RTAB-Map mapping in a cluttered world, map scored against true geometry | ✅ done, tag `phase3-slam` |
 | **4. Autonomy loop** | Plan over the map (RRT*), fly it, replan around new obstacles | ⏳ planned |
 
 ## Repository layout
 
 ```
 firmware/        PX4 parameters we depend on, and the small PX4 patches we apply
-sim/             Gazebo worlds and models (flow_field: textured ground for optical flow)
+sim/             Gazebo worlds and models (flow_field, cluttered; x500_mapper with RGB-D)
 ros2_ws/         colcon workspace
   src/quad_offboard/     Phase 1: offboard velocity control node (C++20)
   src/quad_estimation/   Phase 2: error-state EKF node + replay tool (C++20)
-  src/quad_perception/   Phase 3 (stub)
+  src/quad_perception/   Phase 3: PX4 odometry bridge, RTAB-Map mapping launch (C++20)
   src/quad_planning/     Phase 4 (stub)
   src/external/          px4_msgs, px4_ros_com (fetched by setup, git-ignored)
 scripts/         setup, sim launcher, demos, evaluation / replay tooling
@@ -96,6 +96,8 @@ git clone <this repo> ~/projects/quad-autonomy-sim && cd ~/projects/quad-autonom
 # 4+5. Apply firmware/px4_patches, build PX4 SITL, the Micro XRCE-DDS
 #      agent (~/.local) and ros2_ws.                                [no sudo]
 ./scripts/setup/03_build_workspace.sh
+# Phase 3+: ROS 2 <-> Gazebo Harmonic bridge and RTAB-Map (apt).       [sudo]
+./scripts/setup/04_install_perception_deps.sh
 ```
 
 Each script is safe to re-run and skips work that is already done. The pinned
@@ -212,13 +214,48 @@ Every demo flight records the raw sensor inputs, so it can be re-run offline
 through the same estimator code with different parameters (`eskf_replay`; see
 the design doc).
 
-## Phase 3: Perception + SLAM (planned)
+## Phase 3: Perception + SLAM
 
-**What it will do.** Put a depth camera or LiDAR on the x500 (PX4 already ships
-`gz_x500_depth` and `gz_x500_lidar_*`), bridge it with `ros_gz`, and run RTAB-Map to
-build a map live while flying a scripted path through a cluttered world in `sim/worlds`.
-Plan: [docs/phase3_perception_slam.md](docs/phase3_perception_slam.md) ·
-stub: [ros2_ws/src/quad_perception](ros2_ws/src/quad_perception).
+**What it does.** An x500 with a forward RGB-D camera (`sim/models/x500_mapper`)
+flies two laps of a scripted route through `sim/worlds/cluttered.sdf`, facing its
+direction of travel, while RTAB-Map builds a 3D map live. The odometry comes
+from PX4 EKF2 via a small C++ bridge. The map is then scored against the world's
+true obstacle geometry, placed by measurement rather than fitted to it.
+
+| map vs true geometry | PX4 EKF2 odometry | ground-truth odometry (sim-only diagnostic) |
+|---|---|---|
+| median / mean distance to true surface | 6.4 / 8.1 cm | 1.5 / 1.8 cm |
+| points within 10 / 20 cm | 68.7 / 94.9 % | 100 / 100 % |
+| phantom points (> 0.5 m from any surface) | 0 % | 0 % |
+| obstacles seen, mean surface coverage | 11/11, 61.1 % | 11/11, 69.3 % |
+
+The perfect-odometry run shows the mapping pipeline itself is accurate to about
+1.5 cm. What remains in the real configuration is EKF2's odometry error (about
+2 deg heading, 0.13 m position). Details, design, findings and limitations:
+[docs/phase3_perception_slam.md](docs/phase3_perception_slam.md).
+
+**How to run it.**
+
+```bash
+# terminal 1: mapping drone in the cluttered world
+source scripts/env.sh && ./scripts/sim.sh --model x500_mapper --world cluttered
+# terminal 2: bridge + RTAB-Map + RViz
+source scripts/env.sh && ros2 launch quad_perception mapping.launch.py rviz:=true
+# terminal 3: fly two laps, camera facing the direction of travel
+source scripts/env.sh && ros2 run quad_offboard offboard_square --ros-args \
+  --params-file ros2_ws/src/quad_offboard/config/square_mission.yaml \
+  -p "route_nea:=[0.0, 10.0, 1.8, 10.0, 10.0, 1.8, 10.0, 0.0, 1.8, 0.0, 0.0, 1.8]" \
+  -p laps:=2 -p yaw_mode:=travel -p cruise_speed_mps:=1.5
+```
+
+**How to reproduce the demo** (flies, maps, exports, scores):
+
+```bash
+source scripts/env.sh && ./scripts/demo_phase3.sh --headless
+ODOM_SOURCE=gt ./scripts/demo_phase3.sh --headless   # perfect-odometry baseline
+# -> logs/phase3_<ts>/{rtabmap.db, cloud.ply, map.png, map_metrics.json}
+# rtabmap-databaseViewer logs/phase3_<ts>/rtabmap.db   to browse the map
+```
 
 ## Phase 4: Autonomy loop (planned)
 

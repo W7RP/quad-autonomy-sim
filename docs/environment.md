@@ -106,3 +106,24 @@ Issues hit during Phase 2, with details in docs/phase2_state_estimation.md
 11. **Tooling.** `ros2 run` orphaned background nodes; the ROS 2 CLI daemon got
     stuck; an unoptimised build ran 27x slower. All fixed in the scripts and
     CMake files.
+
+## Phase 3 additions (verified 2026-09-27)
+
+| Item | Value |
+|---|---|
+| ROS 2 <-> Gazebo bridge | `ros-humble-ros-gzharmonic` 0.244.12 (Gazebo apt repo; **not** the ROS repo's `ros-humble-ros-gz`, which targets Fortress) |
+| RTAB-Map | `ros-humble-rtabmap-ros` 0.23.7 |
+| Install | `scripts/setup/04_install_perception_deps.sh` (sudo, run by the user) |
+| Vehicle / world | project model `x500_mapper` (x500 + RGB-D 320x240 @ 15 Hz) / generated `sim/worlds/cluttered.sdf` |
+
+| Check | Result |
+|---|---|
+| Unit tests (`quad_offboard`, `quad_estimation`, `quad_perception`) | 34 tests, 0 failures, 0 compiler warnings |
+| Phase 3 demo, EKF2 odometry | pass: map median error 6.4 cm, 94.9 % of points within 20 cm, 0 % phantoms, 11/11 obstacles, 61.1 % coverage |
+| Phase 3 demo, ground-truth odometry (diagnostic) | pass: median 1.5 cm, 100 % within 10 cm |
+| Regression after Phase 3 changes | Phase 1 pass (5.35 x 5.43 m square); Phase 2 pass (ESKF horizontal RMSE 0.26 m, IMU callback 10 us mean / 96 us max, 0 allocations) |
+
+Issue hit during Phase 3: 12. **An orphaned Gazebo server ignored SIGTERM** and
+contaminated later runs. `sim.sh` now refuses to start while any Gazebo is
+running and escalates to SIGKILL; affected results were re-run.
+| RGB-D rendering headless on WSLg | 15 Hz colour + depth; real-time factor 0.9997 with the camera rendering (measured before flight) |

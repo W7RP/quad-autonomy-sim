@@ -10,6 +10,14 @@
 | `MicroXRCEAgent udp4 -p 8888` | `scripts/sim.sh` | turns PX4's XRCE-DDS client sessions into full DDS participants |
 | ROS 2 nodes | `ros2 run` / launch | autonomy. They only see `/fmu/in/*` and `/fmu/out/*` DDS topics |
 
+For project vehicles (`sim/models/<name>/px4_airframe`, e.g. the Phase 3
+`x500_mapper`), `scripts/sim.sh` starts the Gazebo server and spawns the model
+itself, and PX4 attaches to it (`PX4_GZ_MODEL_NAME`, `PX4_SYS_AUTOSTART`).
+
+Phase 3's ROS nodes (the ros_gz_bridge, the odometry bridge, RTAB-Map) run on
+**simulation time** from Gazebo's `/clock`, because the camera images carry
+Gazebo stamps.
+
 PX4 and Gazebo run in lockstep: PX4's clock advances only as Gazebo steps. If
 Gazebo runs slower than real time, the whole simulation slows down consistently
 rather than PX4 seeing late sensor data.
