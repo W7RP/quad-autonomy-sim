@@ -67,12 +67,27 @@ apply_params_post_boot() {
   log "applied ${#project_params[@]} project parameters after boot"
 }
 
+# A Gazebo server left over from an earlier session contaminates this one: PX4
+# attaches to whatever world is already running, and two servers of the same
+# world name collide on gz-transport topics. Seen here: an orphaned server
+# survived SIGTERM and silently shared the machine with later runs.
+if stale="$(pgrep -f "gz sim" | tr '\n' ' ')" && [[ -n "$stale" ]]; then
+  die "Gazebo already running (pid $stale). Stop it first: pkill -KILL -f 'gz sim'"
+fi
+
 pids=()
 cleanup() {
   for pid in "${pids[@]}"; do kill "$pid" 2>/dev/null || true; done
-  # PX4 starts gz sim itself; make sure no server/GUI outlives the session.
+  # PX4 or this script started gz sim; make sure no server/GUI outlives the
+  # session. An orphaned gz server was seen ignoring SIGTERM, so escalate.
   pkill -f "gz sim.*${world}.sdf" 2>/dev/null || true
   pkill -f "gz sim -g" 2>/dev/null || true
+  for _ in $(seq 1 10); do
+    pgrep -f "gz sim.*${world}.sdf|gz sim -g" >/dev/null || break
+    sleep 0.5
+  done
+  pkill -KILL -f "gz sim.*${world}.sdf" 2>/dev/null || true
+  pkill -KILL -f "gz sim -g" 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
 
@@ -110,7 +125,34 @@ if [[ -f "$REPO_ROOT/sim/worlds/$world.sdf" ]]; then
   export PX4_GZ_WORLDS="$REPO_ROOT/sim/worlds"
 fi
 
-log "starting PX4 SITL ($PX4_SIM_MODEL, world=$world, headless=$headless, state=$workdir)"
+# Project vehicles (sim/models/<model> with a px4_airframe file) have no PX4
+# airframe of their own. Start Gazebo, spawn the model, and let PX4 attach to it
+# with the airframe named in px4_airframe. px4-rc.gzsim finds the running world
+# and skips starting one.
+if [[ -f "$REPO_ROOT/sim/models/$model/px4_airframe" ]]; then
+  world_file="${PX4_GZ_WORLDS}/${world}.sdf"
+  [[ -f "$world_file" ]] || die "world not found: $world_file"
+  log "project vehicle $model: starting Gazebo ($world) and spawning it"
+  gz sim --verbose=1 -r -s "$world_file" >"${QUAD_LOG_DIR:-/tmp}/gz_server.log" 2>&1 &
+  pids+=($!)
+  if ((!headless)); then
+    gz sim -g >/dev/null 2>&1 &
+    pids+=($!)
+  fi
+  for _ in $(seq 1 60); do
+    gz service -i --service "/world/$world/scene/info" 2>/dev/null | grep -q "Service providers" && break
+    sleep 0.5
+  done
+  gz service -s "/world/$world/create" --reqtype gz.msgs.EntityFactory \
+    --reptype gz.msgs.Boolean --timeout 5000 \
+    --req "name: \"${model}_0\", allow_renaming: false, sdf_filename: \"$REPO_ROOT/sim/models/$model/model.sdf\"" \
+    >/dev/null || die "could not spawn $model into $world"
+  export PX4_SYS_AUTOSTART="$(tr -d '[:space:]' <"$REPO_ROOT/sim/models/$model/px4_airframe")"
+  export PX4_GZ_MODEL_NAME="${model}_0"
+  unset PX4_SIM_MODEL
+fi
+
+log "starting PX4 SITL (model=$model, world=$world, headless=$headless, state=$workdir)"
 cd "$workdir"
 apply_params_post_boot >&2 &
 pids+=($!)

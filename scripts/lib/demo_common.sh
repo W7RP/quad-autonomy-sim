@@ -4,21 +4,26 @@
 demo_pids=()
 
 demo_cleanup() {
+  demo_stop_launch 30
   # SIGTERM, not SIGINT: background jobs of a non-interactive shell ignore SIGINT.
   # Reverse order: recorders and nodes first, the simulator last.
   local i pid
   for ((i = ${#demo_pids[@]} - 1; i >= 0; i--)); do
     kill "${demo_pids[i]}" 2>/dev/null || true
   done
-  # Give everything 5 s to exit cleanly, then make sure nothing outlives the demo:
-  # a stray estimator from a previous run keeps publishing on the same topic.
-  for _ in $(seq 1 50); do
+  # Give everything 10 s to exit cleanly (sim.sh itself needs up to 5 s to stop
+  # Gazebo), then make sure nothing outlives the demo: a stray estimator keeps
+  # publishing on the same topics, and a stray Gazebo server contaminates the
+  # next run.
+  for _ in $(seq 1 100); do
     local alive=0
     for pid in "${demo_pids[@]}"; do kill -0 "$pid" 2>/dev/null && alive=1; done
     ((alive)) || break
     sleep 0.1
   done
   for pid in "${demo_pids[@]}"; do kill -9 "$pid" 2>/dev/null || true; done
+  # Safety net if sim.sh was killed before its own cleanup finished.
+  pkill -KILL -f "gz sim" 2>/dev/null || true
   wait 2>/dev/null || true
 }
 
@@ -74,4 +79,28 @@ demo_wait_for_message() {
 demo_record() {
   ros2 topic echo --no-daemon --csv --qos-reliability best_effort "$1" "$2" >"$3" 2>/dev/null &
   demo_pids+=($!)
+}
+
+# demo_start_launch <logfile> <ros2 launch args...>   (background, own process group)
+# `ros2 launch` starts several child processes; running it under setsid lets
+# demo_stop_launch signal the whole group, so no node is orphaned.
+demo_start_launch() {
+  local logfile="$1"
+  shift
+  setsid ros2 launch "$@" >"$logfile" 2>&1 &
+  demo_launch_pgid=$!
+  demo_pids+=($!)
+}
+
+# demo_stop_launch [timeout_s]: SIGINT to the launch group (nodes shut down
+# cleanly; RTAB-Map writes its database on SIGINT), SIGKILL after the timeout.
+demo_stop_launch() {
+  local timeout_s="${1:-30}" start=$SECONDS
+  [[ -n "${demo_launch_pgid:-}" ]] || return 0
+  kill -INT -- "-$demo_launch_pgid" 2>/dev/null || true
+  while kill -0 -- "-$demo_launch_pgid" 2>/dev/null && ((SECONDS - start < timeout_s)); do
+    sleep 0.5
+  done
+  kill -KILL -- "-$demo_launch_pgid" 2>/dev/null || true
+  demo_launch_pgid=""
 }
