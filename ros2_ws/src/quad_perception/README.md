@@ -6,7 +6,7 @@ design, results and known limitations are in
 
 | file | what |
 |---|---|
-| `src/px4_odometry_bridge.cpp` | PX4 `/fmu/out/vehicle_odometry` (NED/FRD) to `/odom` + TF `odom -> base_link` (ENU/FLU), stamped with the ROS (sim) clock on arrival |
+| `src/px4_odometry_bridge.cpp` | PX4 `/fmu/out/vehicle_odometry` (NED/FRD) to `/odom` + TF `odom -> base_link` (ENU/FLU), stamped with the ROS (sim) clock on arrival; silent until PX4 reports a valid position and heading |
 | `include/quad_perception/odometry_conversion.hpp` | the ROS-free conversion, unit-tested in `test/` |
 | `launch/mapping.launch.py` | bridge, static camera TFs, odometry bridge, RTAB-Map, optional RViz |
 | `config/gz_bridge.yaml` | Gazebo to ROS topics: `/clock`, colour, depth, camera info |

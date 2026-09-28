@@ -10,18 +10,26 @@
 // this node stamps each sample with the ROS (simulation) clock on arrival. The
 // cost is the DDS transport latency, a few ms: millimetres at mapping speeds.
 // Samples are also dropped if they arrive out of order.
+//
+// Validity: nothing is published until PX4 first reports the estimate usable
+// (vehicle_local_position: xy_valid, z_valid, heading_good_for_control). Before
+// EKF2 aligns its heading, vehicle_odometry carries an identity attitude, which
+// is yaw 90 deg off here; RTAB-Map's first two map nodes, taken on the ground
+// with it, drew a phantom box_tall into the Phase 4 map.
 
 #include <memory>
 #include <string>
 
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <nav_msgs/msg/odometry.hpp>
+#include <px4_msgs/msg/vehicle_local_position.hpp>
 #include <px4_msgs/msg/vehicle_odometry.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <tf2_ros/transform_broadcaster.h>
 
 #include "quad_perception/odometry_conversion.hpp"
 
+using px4_msgs::msg::VehicleLocalPosition;
 using px4_msgs::msg::VehicleOdometry;
 
 namespace quad_perception
@@ -43,6 +51,20 @@ public:
     sub_ = create_subscription<VehicleOdometry>(
       ns + "/fmu/out/vehicle_odometry", rclcpp::SensorDataQoS(),
       [this](const VehicleOdometry & m) {on_odometry(m);});
+    // Versioned PX4 topics carry a _vN suffix (as quad_offboard/px4_topics.hpp).
+    std::string lpos_topic = ns + "/fmu/out/vehicle_local_position";
+    if (VehicleLocalPosition::MESSAGE_VERSION != 0U) {
+      lpos_topic += "_v" + std::to_string(VehicleLocalPosition::MESSAGE_VERSION);
+    }
+    lpos_sub_ = create_subscription<VehicleLocalPosition>(lpos_topic, rclcpp::SensorDataQoS(),
+        [this](const VehicleLocalPosition & m) {
+          // Latched: gate only the start-up alignment. A later flicker (seen
+          // at takeoff) must not cut the odometry the planner flies on.
+          if (!valid_ && m.xy_valid && m.z_valid && m.heading_good_for_control) {
+            RCLCPP_INFO(get_logger(), "PX4 estimate valid: publishing");
+            valid_ = true;
+          }
+        });
     RCLCPP_INFO(get_logger(), "%s -> %s (%s -> %s)", sub_->get_topic_name(),
       pub_->get_topic_name(), odom_frame_.c_str(), base_frame_.c_str());
   }
@@ -50,6 +72,9 @@ public:
 private:
   void on_odometry(const VehicleOdometry & m)
   {
+    if (!valid_) {
+      return;
+    }
     if (m.pose_frame != VehicleOdometry::POSE_FRAME_NED) {
       RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
         "ignoring odometry with pose_frame %u (need NED)", m.pose_frame);
@@ -119,9 +144,11 @@ private:
   std::string odom_frame_;
   std::string base_frame_;
   bool publish_tf_{true};
+  bool valid_{false};
   rclcpp::Time last_stamp_{0, 0, RCL_ROS_TIME};
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pub_;
   rclcpp::Subscription<VehicleOdometry>::SharedPtr sub_;
+  rclcpp::Subscription<VehicleLocalPosition>::SharedPtr lpos_sub_;
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_;
 };
 
