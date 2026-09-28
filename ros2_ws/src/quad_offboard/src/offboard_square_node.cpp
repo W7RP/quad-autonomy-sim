@@ -36,6 +36,9 @@
 #include <px4_msgs/msg/vehicle_local_position.hpp>
 #include <px4_msgs/msg/vehicle_status.hpp>
 
+#include <nav_msgs/msg/path.hpp>
+#include <std_msgs/msg/bool.hpp>
+
 #include "quad_offboard/px4_topics.hpp"
 #include "quad_offboard/waypoint_follower.hpp"
 
@@ -97,6 +100,15 @@ public:
       throw std::invalid_argument("yaw_mode must be 'hold' or 'travel'");
     }
     face_travel_ = yaw_mode == "travel";
+    // route_source:=planner flies paths from quad_planning (/planner/path)
+    // instead of a fixed route; see on_planner_path().
+    const auto route_source = declare_parameter<std::string>("route_source", "params");
+    if (route_source != "params" && route_source != "planner") {
+      throw std::invalid_argument("route_source must be 'params' or 'planner'");
+    }
+    use_planner_ = route_source == "planner";
+    acceptance_radius_ = get_parameter("acceptance_radius_m").as_double();
+    planner_timeout_s_ = declare_parameter<double>("planner_timeout_s", 90.0);
     max_yaw_rate_ = declare_parameter<double>("max_yaw_rate_dps", 0.0) * M_PI / 180.0;
     px4_timeout_s_ = declare_parameter<double>("px4_timeout_s", 120.0);
     engage_timeout_s_ = declare_parameter<double>("engage_timeout_s", 20.0);
@@ -132,6 +144,14 @@ public:
         heading_ = msg.heading;
         pos_valid_ = msg.xy_valid && msg.z_valid && msg.v_xy_valid && msg.v_z_valid;
       }, sub_opts);
+
+    if (use_planner_) {
+      const auto latched = rclcpp::QoS(1).reliable().transient_local();
+      path_sub_ = create_subscription<nav_msgs::msg::Path>("/planner/path", latched,
+          [this](const nav_msgs::msg::Path & m) {on_planner_path(m);}, sub_opts);
+      done_sub_ = create_subscription<std_msgs::msg::Bool>("/planner/mission_complete", latched,
+          [this](const std_msgs::msg::Bool & m) {planner_done_ = m.data;}, sub_opts);
+    }
 
     offboard_mode_pub_ = create_publisher<OffboardControlMode>(
       px4_topic<OffboardControlMode>(ns, "/fmu/in/offboard_control_mode"), 10);
@@ -173,7 +193,10 @@ private:
   bool load_route()
   {
     std::vector<Vec3> wps;
-    if (route_nea_.empty()) {
+    if (use_planner_) {
+      // Climb in place; the planner's paths take over from there.
+      wps.push_back({pos_.x, pos_.y, pos_.z - altitude_m_});
+    } else if (route_nea_.empty()) {
       const auto square = make_square(pos_, side_m_, altitude_m_);
       wps.assign(square.begin(), square.end());
     } else {
@@ -197,6 +220,44 @@ private:
     RCLCPP_INFO(get_logger(), "route: %zu waypoints, yaw %s", wps.size(),
       face_travel_ ? "facing travel" : "held");
     return true;
+  }
+
+  // Planner paths arrive in `odom` (ENU, origin = PX4's local origin), i.e.
+  // PX4's local NED frame with axes swapped: north = y, east = x, down = -z.
+  // Leading waypoints within 1 m of the vehicle are dropped, so a replan does
+  // not make it stop where it already is. An empty path means "hold here".
+  void on_planner_path(const nav_msgs::msg::Path & m)
+  {
+    last_path_time_ = now();
+    std::vector<Vec3> wps;
+    for (const auto & ps : m.poses) {
+      const Vec3 ned{ps.pose.position.y, ps.pose.position.x, -ps.pose.position.z};
+      // Skip leading waypoints the vehicle is already at (the planner starts
+      // every path at the vehicle's position). Only those: an earlier version
+      // skipped everything within 1 m, which threw away the short sidestep of
+      // an evasive path, so the vehicle cut straight at the next far waypoint,
+      // through the margin of the obstacle it was avoiding.
+      if (wps.empty()) {
+        const double d = std::hypot(ned.x - pos_.x, ned.y - pos_.y, ned.z - pos_.z);
+        if (d < acceptance_radius_) {
+          continue;
+        }
+      }
+      wps.push_back(ned);
+    }
+    if (wps.empty() || wps.size() > WaypointFollower::kMaxWaypoints) {
+      holding_ = true;
+      RCLCPP_INFO(get_logger(), "planner: %s, holding position",
+        wps.empty() ? "empty path" : "path too long");
+      return;
+    }
+    std::vector<Vec3> with_start{pos_};
+    with_start.insert(with_start.end(), wps.begin(), wps.end());
+    std::vector<double> yaws(with_start.size(), yaw_setpoint_);
+    travel_yaws(with_start, yaw_setpoint_, yaws);
+    follower_.set_route(wps, std::span<const double>(yaws).subspan(1));
+    holding_ = false;
+    RCLCPP_INFO(get_logger(), "planner: new path, %zu waypoints", wps.size());
   }
 
   void set_phase(Phase next)
@@ -272,9 +333,22 @@ private:
             return;
           }
           const std::size_t before = follower_.active_index();
-          const auto cmd = follower_.step(pos_, vel_);
+          const auto cmd = holding_ ? std::nullopt : follower_.step(pos_, vel_);
           if (follower_.active_index() != before && !follower_.finished()) {
             RCLCPP_INFO(get_logger(), "waypoint %zu/%zu reached", before + 1, follower_.size());
+          }
+          if (!cmd && use_planner_ && !planner_done_) {
+            // Between paths (or told to hold): hover in place, keep streaming.
+            if (last_path_time_.nanoseconds() > 0 &&
+              (now() - last_path_time_).seconds() > planner_timeout_s_)
+            {
+              RCLCPP_ERROR(get_logger(), "no planner path for %.0f s, landing", planner_timeout_s_);
+              send_command(VehicleCommand::VEHICLE_CMD_NAV_LAND);
+              set_phase(Phase::kLand);
+              return;
+            }
+            publish_velocity({0.0, 0.0, 0.0}, yaw_setpoint_);
+            return;
           }
           if (!cmd) {
             RCLCPP_INFO(get_logger(), "route complete, landing");
@@ -358,7 +432,15 @@ private:
   std::vector<double> route_nea_;
   int laps_{1};
   bool face_travel_{false};
+  double acceptance_radius_{0.3};  // [m] = the follower's
   double max_yaw_rate_{0.0};   // [rad/s], 0 = unlimited
+  bool use_planner_{false};
+  bool planner_done_{false};
+  bool holding_{false};
+  double planner_timeout_s_{90.0};
+  rclcpp::Time last_path_time_{0, 0, RCL_ROS_TIME};
+  rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr path_sub_;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr done_sub_;
   double control_dt_{0.05};
   double yaw_setpoint_{0.0};
   double px4_timeout_s_{};
