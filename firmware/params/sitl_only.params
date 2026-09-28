@@ -31,3 +31,11 @@ SENS_MAG_AUTOCAL 0
 CAL_MAG0_XOFF 0.0
 CAL_MAG0_YOFF 0.0
 CAL_MAG0_ZOFF 0.0
+
+# GPS delay compensation off: PX4's simulated GPS (sensor_gps_sim) stamps each
+# fix with the true sample time and adds no latency, but EKF2 assumed the
+# hardware default of 110 ms and so ran ~0.1 s AHEAD of ground truth (measured
+# against both Gazebo's and PX4's ground truth in Phase 4: ~0.15 m at 1.5 m/s,
+# drawn into the map as displaced surfaces). PX4's own SIH airframes set 0 for
+# the same reason. On hardware keep the receiver's real latency (default 110).
+EKF2_GPS_DELAY 0

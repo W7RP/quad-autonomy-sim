@@ -10,7 +10,7 @@ cloned at a pinned tag (`PX4_VERSION` in `scripts/setup/common.sh`, currently
 | File | Used by |
 |---|---|
 | `params/common.params` | SITL: applied by `scripts/sim.sh` at every boot. Hardware: apply the same values via QGC |
-| `params/sitl_only.params` | SITL only: no ground station (`NAV_DLL_ACT 0`), PX4's WMM magnetometer simulator, pinned magnetometer calibration, simulated-world declination |
+| `params/sitl_only.params` | SITL only: no ground station (`NAV_DLL_ACT 0`), PX4's WMM magnetometer simulator, pinned magnetometer calibration, simulated-world declination, no GPS delay compensation (`EKF2_GPS_DELAY 0`: PX4's simulated GPS has no latency) |
 | `params/hardware_uxrce_dds.params.example` | hardware only: uXRCE-DDS over TELEM2 or Ethernet |
 
 The airframes are PX4's stock `4001_gz_x500` (Phase 1) and `4021_gz_x500_flow`
