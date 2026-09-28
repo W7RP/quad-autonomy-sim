@@ -5,7 +5,7 @@
   <version>0.3.0</version>
   <description>Phase 3: RGB-D sensing, PX4 odometry bridge and RTAB-Map live mapping.</description>
   <maintainer email="jd.arrobas@proton.me">W7RP</maintainer>
-  <license>TBD</license>
+  <license>MIT</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 

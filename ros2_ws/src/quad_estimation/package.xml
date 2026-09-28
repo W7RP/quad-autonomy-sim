@@ -5,7 +5,7 @@
   <version>0.2.0</version>
   <description>Hand-rolled C++20 error-state EKF fusing IMU, optical flow, rangefinder and magnetometer (Phase 2).</description>
   <maintainer email="jd.arrobas@proton.me">W7RP</maintainer>
-  <license>TBD</license>
+  <license>MIT</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 

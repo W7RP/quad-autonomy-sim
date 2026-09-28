@@ -26,3 +26,6 @@ frame, then apply the params above.
 
 Each patch is a plain `git diff` against the pinned tag. If a PX4 bump makes
 one fail to apply, the setup script stops and names it.
+
+The patches modify PX4, so they are covered by PX4's BSD 3-Clause license
+rather than this repository's MIT license.
