@@ -1,18 +1,118 @@
 # quad-autonomy-sim
 
-A simulated autonomous quadrotor built on the real flight stack: **PX4 Autopilot**
-firmware in software-in-the-loop (SITL), **Gazebo Harmonic** for physics and
-sensors, and **ROS 2 Humble** for the autonomy software. The custom estimation,
-planning and control nodes are written in C++20.
+An autonomous quadrotor, built end to end in simulation on the same flight
+stack real drones use. It flies with **PX4** (the autopilot firmware on
+Pixhawk flight controllers), simulated in **Gazebo Harmonic**. The autonomy
+software is **ROS 2** nodes written in C++20: a hand-rolled state estimator,
+RGB-D mapping, and a 3D planner that replans when the world changes mid-flight.
 
-There's no hardware involved, but the boundaries match a real vehicle. Everything
-custom talks to PX4 only through the uXRCE-DDS `/fmu/in` and `/fmu/out` topics, the
-same interface a Pixhawk-class flight controller exposes to a companion computer.
-Moving to hardware means swapping Gazebo+SITL for the physical flight controller and
-changing the agent's transport from UDP to serial or Ethernet. See
-[docs/hardware_migration.md](docs/hardware_migration.md).
+![Phase 4 mission: planned paths and the flown track around an obstacle dropped mid-flight](docs/media/phase4_mission.png)
 
-## Architecture
+*The final demo, seen from above. The drone laps the field to map it, then
+crosses it diagonally. Three metres into the crossing, a 2.6 m box (red) is
+dropped onto its path. It replans in about 0.1 s and goes around. The thin
+lines are the planner's paths over time; the black line is where the vehicle
+actually flew. (The track crossing the tilted box near (7, 3) is not a
+collision: that box is 1.2 m tall, and the planner flies over it.)*
+
+## Why it's built this way
+
+The point was to build the whole loop the way it would be built for a real
+vehicle, not a simplified version of it:
+
+- **Real flight stack, real boundary.** PX4 runs as software-in-the-loop, and
+  everything custom talks to it only through the uXRCE-DDS `/fmu/in` and
+  `/fmu/out` topics. That is the same interface a Pixhawk exposes to a
+  companion computer, and PX4 keeps ownership of stabilisation and failsafes.
+  Moving to hardware is a transport and config change
+  ([hardware_migration.md](docs/hardware_migration.md)).
+- **Measured, not eyeballed.** Every phase is scored against Gazebo's ground
+  truth by an evaluation script with thresholds fixed in advance. Maps are
+  placed in the world by measurement rather than fitted to it, because fitting
+  would hide exactly the errors worth finding.
+- **C++20 where it matters.** The estimation, planning and control nodes are
+  C++20, with their core logic ROS-free and unit-tested. Python is only used
+  for launch files and offline analysis.
+
+## The four phases
+
+Each phase is a working milestone with a demo, a scored result and a design
+write-up, and is tagged in git.
+
+| phase | what it adds | tag | write-up |
+|---|---|---|---|
+| 1. Bring-up | PX4 SITL + Gazebo + the ROS 2 bridge; a C++ node flies a square in offboard mode | `phase1-bringup` | [phase1_bringup.md](docs/phase1_bringup.md) |
+| 2. State estimation | a hand-rolled error-state Kalman filter, scored against ground truth, with real-time discipline | `phase2-estimation` | [phase2_state_estimation.md](docs/phase2_state_estimation.md) |
+| 3. Perception + SLAM | an RGB-D camera and RTAB-Map mapping a cluttered world, map scored against the true geometry | `phase3-slam` | [phase3_perception_slam.md](docs/phase3_perception_slam.md) |
+| 4. Autonomy loop | RRT* planning over the map; fly, detect a new obstacle, replan | `phase4-autonomy` | [phase4_autonomy.md](docs/phase4_autonomy.md) |
+
+### 1. Bring-up
+
+A stock PX4 x500 in Gazebo, bridged to ROS 2, and a C++ node that arms, takes
+off, flies a square with velocity setpoints and lands. It is small, but it
+sets the rules everything later follows: NED only at the PX4 boundary, the
+node gives up control the moment PX4 leaves offboard mode, and every demo is a
+single command that flies, records and checks the result.
+
+### 2. State estimation
+
+An error-state EKF that fuses the IMU with optical flow, a downward
+rangefinder and a magnetometer, running in shadow mode next to PX4's own EKF2
+on a GPS-less drone over a textured field. On a held-out flight it tracked
+position to 0.34 m RMS (EKF2: 0.48 m) and altitude to 1.1 cm (EKF2: 14 cm).
+The real-time design is the other half: a sensor thread that owns the filter,
+a handoff to an output thread that never blocks, fixed-size math, and **zero heap
+allocations in the hot path**, counted live. The IMU callback averages about
+10-14 µs.
+
+![Phase 2: ESKF vs PX4 EKF2 vs ground truth](docs/media/phase2_estimation.png)
+
+### 3. Perception + SLAM
+
+An x500 with a forward RGB-D camera laps a generated world of 11 obstacles
+while RTAB-Map builds a 3D map on PX4's odometry. `eval_map.py` then measures
+every map point against the true obstacle surfaces from the world file. The
+best maps have a median error of about 2 cm, with no phantom points.
+Getting there is its own story (below).
+
+![Phase 3: map vs true obstacles, and the error histogram](docs/media/phase3_map.png)
+
+### 4. Autonomy loop
+
+The planner builds a 10 cm voxel grid from RTAB-Map's map plus the live depth
+image. It inflates the grid by a margin budgeted from measured errors, plans
+with RRT* and shortcut smoothing, and checks the path in force five times a
+second. In five scored runs, the vehicle reached every goal and reacted to
+the dropped obstacle in 0.08-0.15 s. Its closest pass to any real surface was
+0.47 m, and it planned in about 30 ms per replan against a 400 ms budget.
+
+## Things that broke
+
+Most of the interesting work was in the failures. A few favourites, each
+written up in full in the phase docs:
+
+- **The drone dropped out of offboard mode, but only with the GUI open.** The
+  setpoints were fine. The DDS bridge converts timestamps with a clock offset
+  that goes stale when the simulation runs slightly slower than real time, so
+  fresh setpoints looked a second old. The fix was one field: send timestamp 0,
+  meaning "stamp on arrival".
+- **Gazebo's magnetometer was wrong whenever the drone tilted.** An axis
+  remap fixed the tilt but broke GPS flights elsewhere. The final fix switched
+  to PX4's own magnetometer simulator, with a small PX4 patch.
+- **The planner's map had ghost walls**, and the vehicle kept replanning
+  around obstacles that weren't there. It came down to three separate causes:
+  - PX4's EKF2 was running 0.1 s *ahead* of reality: it compensated a GPS delay
+    the simulator doesn't have.
+  - RTAB-Map's loop closures were bending the map. The same database scored
+    7.5 cm median error with them and 1.9 cm without.
+  - The first two map frames were taken before the estimator knew which way
+    it was facing.
+- **The drone skipped its own evasive manoeuvre.** A harmless-looking rule
+  that ignored waypoints within 1 m also threw away the short sidestep of an
+  evasive path. The vehicle cut straight at the obstacle's margin, and the
+  planner replanned every 0.1 s in a loop.
+
+## How it fits together
 
 ```mermaid
 flowchart LR
@@ -34,243 +134,41 @@ flowchart LR
   PX4 --- XC
   XC <-- "UDP :8888<br/>(serial on hardware)" --> AG
   AG <-- "ROS 2 DDS<br/>/fmu/in, /fmu/out" --> OFF & EST & PLN
-  GZ -. "ros_gz bridge<br/>camera / lidar (Phase 3)" .-> PER
+  GZ -. "ros_gz bridge<br/>RGB-D camera" .-> PER
   PER --> PLN --> OFF
 ```
 
-| Layer | Simulation | Real vehicle |
+| layer | in this repo | on a real vehicle |
 |---|---|---|
-| Physics, sensors | Gazebo Harmonic (`gz_x500`) | airframe, IMU, GPS, cameras |
-| Flight control | PX4 v1.17 SITL (POSIX build) | the same PX4 release on NuttX on a Pixhawk |
-| FC ↔ companion link | uXRCE-DDS over UDP localhost | uXRCE-DDS over UART or Ethernet |
-| Autonomy | ROS 2 Humble nodes in `ros2_ws/` | the same nodes on a Jetson, Pi or NUC |
+| physics, sensors | Gazebo Harmonic | the airframe and its sensors |
+| flight control | PX4 v1.17 SITL | the same PX4 release on a Pixhawk |
+| flight controller to companion link | uXRCE-DDS over UDP | uXRCE-DDS over UART or Ethernet |
+| autonomy | ROS 2 Humble nodes in `ros2_ws/` | the same nodes on a Jetson, Pi or NUC |
 
-More detail is in [docs/architecture.md](docs/architecture.md).
-
-## Roadmap
-
-Each phase is a working milestone, tagged in git (`phase1-bringup`, `phase2-estimation`, …).
-
-| Phase | Goal | Status |
-|---|---|---|
-| **1. Bring-up** | SITL + Gazebo + ROS 2 bridge; C++ offboard node flies a square | ✅ done, tag `phase1-bringup` |
-| **2. State estimation** | Hand-rolled C++20 ESKF (IMU + optical flow + range + mag), validated against ground truth, real-time discipline | ✅ done, tag `phase2-estimation` |
-| **3. Perception + SLAM** | RGB-D camera on the x500, RTAB-Map mapping in a cluttered world, map scored against true geometry | ✅ done, tag `phase3-slam` |
-| **4. Autonomy loop** | Plan over the map (RRT*), fly it, replan around new obstacles | ⏳ planned |
-
-## Repository layout
+More in [architecture.md](docs/architecture.md).
 
 ```
-firmware/        PX4 parameters we depend on, and the small PX4 patches we apply
-sim/             Gazebo worlds and models (flow_field, cluttered; x500_mapper with RGB-D)
-ros2_ws/         colcon workspace
-  src/quad_offboard/     Phase 1: offboard velocity control node (C++20)
-  src/quad_estimation/   Phase 2: error-state EKF node + replay tool (C++20)
-  src/quad_perception/   Phase 3: PX4 odometry bridge, RTAB-Map mapping launch (C++20)
-  src/quad_planning/     Phase 4 (stub)
-  src/external/          px4_msgs, px4_ros_com (fetched by setup, git-ignored)
-scripts/         setup, sim launcher, demos, evaluation / replay tooling
-docs/            architecture, per-phase design notes, setup details, verified versions
+firmware/        PX4 parameters and the two small PX4 patches
+sim/             Gazebo worlds and models (generated obstacle fields, the RGB-D x500)
+ros2_ws/src/
+  quad_offboard/     offboard flight node and waypoint follower
+  quad_estimation/   error-state EKF node + offline replay
+  quad_perception/   PX4 odometry bridge, RTAB-Map launch
+  quad_planning/     voxel grid, RRT*, planner node
+scripts/         setup, simulator launcher, one-command demos, evaluation
+docs/            per-phase design write-ups, architecture, verified environment
 ```
 
-## Setup (from a clean Windows machine)
+## Running it
 
-Tested on WSL2 with Ubuntu 22.04. The versions that were actually installed and
-verified are recorded in [docs/environment.md](docs/environment.md).
+Built and tested on WSL2 with Ubuntu 22.04, ROS 2 Humble, PX4 v1.17.0 and
+Gazebo Harmonic 8.15. Four setup scripts install and build everything, and each
+phase has a one-command demo (`scripts/demo_phaseN.sh`) that flies it and
+scores the result. Setup, the demos and how to run each phase by hand are in
+[docs/running.md](docs/running.md). Exact versions are in
+[docs/environment.md](docs/environment.md).
 
-**0. WSL2 + Ubuntu 22.04** (Windows side, run once in an admin PowerShell):
-`wsl --install -d Ubuntu-22.04`. Windows 11 includes WSLg, so Gazebo's GUI works
-without an X server. Keep this repo inside the Linux filesystem (`~/…`), not under
-`/mnt/c`; builds on the Windows mount are many times slower.
+## License
 
-Everything after this runs inside the Ubuntu shell:
-
-```bash
-git clone <this repo> ~/projects/quad-autonomy-sim && cd ~/projects/quad-autonomy-sim
-
-# 1+2. ROS 2 Humble (apt binaries) + colcon.                       [sudo]
-./scripts/setup/01_install_ros2_humble.sh
-# 3. PX4 v1.17.0 clone + PX4's ubuntu.sh (toolchain + Gazebo Harmonic).  [sudo]
-./scripts/setup/02_install_px4_toolchain.sh
-# Open a new shell, then:
-# 4+5. Apply firmware/px4_patches, build PX4 SITL, the Micro XRCE-DDS
-#      agent (~/.local) and ros2_ws.                                [no sudo]
-./scripts/setup/03_build_workspace.sh
-# Phase 3+: ROS 2 <-> Gazebo Harmonic bridge and RTAB-Map (apt).       [sudo]
-./scripts/setup/04_install_perception_deps.sh
-```
-
-Each script is safe to re-run and skips work that is already done. The pinned
-versions (PX4 tag, px4_msgs branch, agent tag) live in
-[scripts/setup/common.sh](scripts/setup/common.sh). Troubleshooting notes are in
-[docs/setup_wsl2.md](docs/setup_wsl2.md).
-
-Every new shell needs the environment:
-
-```bash
-source scripts/env.sh     # ROS 2 + workspace overlay + agent on PATH
-```
-
----
-
-## Phase 1: Bring-up
-
-**What it does.** Starts PX4 SITL with the stock x500 quad in Gazebo, bridges PX4 to
-ROS 2 through the Micro XRCE-DDS agent, and runs `quad_offboard/offboard_square`, a
-C++20 node that:
-
-1. Waits for a valid local position from PX4.
-2. Streams zero-velocity setpoints, then requests OFFBOARD mode and arms, retrying
-   until PX4's preflight checks pass.
-3. Climbs 3 m and flies a 5 m square using **velocity** setpoints. It runs a P
-   controller on position error with separate horizontal and vertical speed limits.
-4. Sends `NAV_LAND` and exits cleanly once PX4 auto-disarms.
-
-If PX4 leaves OFFBOARD for any reason (failsafe, operator mode switch), the node
-aborts and does not try to take control back. The waypoint logic is ROS-free and
-unit-tested (`ros2_ws/src/quad_offboard/test`).
-
-**How to run it** (two terminals, the usual PX4 workflow). Use `scripts/sim.sh`
-rather than bare `make px4_sitl gz_x500`: it also starts the agent and applies
-`firmware/params`, and without those PX4 refuses to arm with no ground station
-connected:
-
-```bash
-# terminal 1: agent + PX4 SITL + Gazebo GUI  (--headless for no GUI)
-source scripts/env.sh && ./scripts/sim.sh
-# terminal 2: once "Ready for takeoff!" appears in terminal 1
-source scripts/env.sh
-ros2 topic list | grep fmu          # bridge check: /fmu/out/vehicle_odometry etc.
-ros2 run quad_offboard offboard_square --ros-args \
-  --params-file ros2_ws/src/quad_offboard/config/square_mission.yaml
-```
-
-**How to reproduce the demo** (one command, logs the flown track):
-
-```bash
-source scripts/env.sh && ./scripts/demo_phase1.sh            # or --headless
-# -> logs/phase1_<timestamp>/{px4.log,node.log,track.csv,track.png}
-```
-
-**Tests:** `cd ros2_ws && colcon test --packages-select quad_offboard quad_estimation && colcon test-result --verbose`
-
-Design notes: [docs/phase1_bringup.md](docs/phase1_bringup.md).
-
-## Phase 2: State estimation
-
-**What it does.** `quad_estimation/eskf_node` is a hand-rolled C++20 error-state
-EKF. It fuses the IMU with downward optical flow, a downward rangefinder and
-magnetometer heading, all read from PX4 over uXRCE-DDS. It runs in shadow mode:
-PX4's EKF2 keeps flying the vehicle (the `x500_flow` airframe, no GPS, over the
-textured `flow_field` world), and our estimate is published on
-`/eskf/odometry_ned` (PX4 conventions) and `/eskf/odometry` (REP-103). Both
-estimators are scored against Gazebo ground truth.
-
-| validation flight (held-out path) | ESKF | PX4 EKF2 |
-|---|---|---|
-| horizontal position RMSE | 0.34 m | 0.48 m |
-| altitude RMSE | 0.011 m | 0.144 m |
-| velocity RMSE | 0.089 m/s | 0.088 m/s |
-| tilt / yaw RMSE | 0.64 / 0.59 deg | 0.08 / 1.26 deg |
-| IMU callback mean / p99 / max | 13.6 / 40 / 80 us, 0 overruns, 0 heap allocations | |
-
-Real-time design:
-- **Bounded time:** every callback does fixed-size work.
-- **No allocation in the hot path:** fixed-size Eigen, verified by the unit
-  tests and counted live.
-- **Explicit threads:** a sensor thread owns the filter; an output thread does
-  everything that allocates, and the hand-off between them never blocks.
-
-The design, the simulator issues found and fixed along the way (dropped IMU
-data, untextured ground, an unusable Gazebo magnetometer), the tuning method,
-and the known limitations (tilt trails EKF2) are in
-[docs/phase2_state_estimation.md](docs/phase2_state_estimation.md). Package
-details: [ros2_ws/src/quad_estimation](ros2_ws/src/quad_estimation).
-
-**How to run it.**
-
-```bash
-# terminal 1: flow airframe over the textured world
-source scripts/env.sh && ./scripts/sim.sh --model x500_flow --world flow_field
-# terminal 2: the estimator (keep the vehicle still ~2 s while it aligns)
-source scripts/env.sh
-ros2 run quad_estimation eskf_node --ros-args \
-  --params-file ros2_ws/src/quad_estimation/config/eskf.yaml
-# terminal 3: fly (Phase 1 node), then watch /eskf/odometry and /diagnostics
-source scripts/env.sh && ros2 run quad_offboard offboard_square --ros-args \
-  --params-file ros2_ws/src/quad_offboard/config/square_mission.yaml
-```
-
-**How to reproduce the demo** (flies, records, then scores against ground truth):
-
-```bash
-source scripts/env.sh && ./scripts/demo_phase2.sh --headless
-SQUARE_SIDE=12 ALTITUDE=4 SPEED=3 ./scripts/demo_phase2.sh --headless   # held-out path
-# -> logs/phase2_<ts>/{metrics.json, estimation.png, diagnostics.txt, raw CSVs}
-# Exit 0 only if the flight completed and the ESKF met the acceptance thresholds.
-```
-
-Every demo flight records the raw sensor inputs, so it can be re-run offline
-through the same estimator code with different parameters (`eskf_replay`; see
-the design doc).
-
-## Phase 3: Perception + SLAM
-
-**What it does.** An x500 with a forward RGB-D camera (`sim/models/x500_mapper`)
-flies two laps of a scripted route through `sim/worlds/cluttered.sdf`, facing its
-direction of travel, while RTAB-Map builds a 3D map live. The odometry comes
-from PX4 EKF2 via a small C++ bridge. The map is then scored against the world's
-true obstacle geometry, placed by measurement rather than fitted to it.
-
-| map vs true geometry | PX4 EKF2 odometry | ground-truth odometry (sim-only diagnostic) |
-|---|---|---|
-| median / mean distance to true surface | 6.4 / 8.1 cm | 1.5 / 1.8 cm |
-| points within 10 / 20 cm | 68.7 / 94.9 % | 100 / 100 % |
-| phantom points (> 0.5 m from any surface) | 0 % | 0 % |
-| obstacles seen, mean surface coverage | 11/11, 61.1 % | 11/11, 69.3 % |
-
-The perfect-odometry run shows the mapping pipeline itself is accurate to about
-1.5 cm. What remains in the real configuration is EKF2's odometry error (about
-2 deg heading, 0.13 m position). Details, design, findings and limitations:
-[docs/phase3_perception_slam.md](docs/phase3_perception_slam.md).
-
-**How to run it.**
-
-```bash
-# terminal 1: mapping drone in the cluttered world
-source scripts/env.sh && ./scripts/sim.sh --model x500_mapper --world cluttered
-# terminal 2: bridge + RTAB-Map + RViz
-source scripts/env.sh && ros2 launch quad_perception mapping.launch.py rviz:=true
-# terminal 3: fly two laps, camera facing the direction of travel
-source scripts/env.sh && ros2 run quad_offboard offboard_square --ros-args \
-  --params-file ros2_ws/src/quad_offboard/config/square_mission.yaml \
-  -p "route_nea:=[0.0, 10.0, 1.8, 10.0, 10.0, 1.8, 10.0, 0.0, 1.8, 0.0, 0.0, 1.8]" \
-  -p laps:=2 -p yaw_mode:=travel -p cruise_speed_mps:=1.5
-```
-
-**How to reproduce the demo** (flies, maps, exports, scores):
-
-```bash
-source scripts/env.sh && ./scripts/demo_phase3.sh --headless
-ODOM_SOURCE=gt ./scripts/demo_phase3.sh --headless   # perfect-odometry baseline
-# -> logs/phase3_<ts>/{rtabmap.db, cloud.ply, map.png, map_metrics.json}
-# rtabmap-databaseViewer logs/phase3_<ts>/rtabmap.db   to browse the map
-```
-
-## Phase 4: Autonomy loop (planned)
-
-**What it will do.** Run a 3D RRT* planner over the Phase 3 map, fly the result
-through the Phase 1 offboard interface, and replan when an obstacle is moved or
-added. The final demo world is recorded as a flythrough.
-Plan: [docs/phase4_autonomy.md](docs/phase4_autonomy.md) ·
-stub: [ros2_ws/src/quad_planning](ros2_ws/src/quad_planning).
-
----
-
-## Conventions
-
-- C++20 for every node in the estimation, planning and control path. Python is used
-  only for launch files and offline analysis scripts.
-- NED frame for anything exchanged with PX4. ENU/FLU (REP-103) for anything
-  published to the wider ROS graph. Conversions happen only at the boundary.
-- No credentials or API keys anywhere in the repo.
+MIT, see [LICENSE](LICENSE). The patches in `firmware/px4_patches` modify PX4
+and stay under PX4's BSD 3-Clause license.
