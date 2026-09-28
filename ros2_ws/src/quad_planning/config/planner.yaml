@@ -1,0 +1,31 @@
+planner:
+  ros__parameters:
+    use_sim_time: true
+    odom_frame: odom
+    # Planning grid in the odom frame (ENU, origin = start position, ~0.24 m
+    # above ground). Covers the demo world with margin. 10 cm cells.
+    grid_origin: [-8.0, -12.0, -0.5]
+    grid_size: [30.0, 30.0, 4.5]
+    grid_resolution: 0.1
+    # Margins, budgeted from measured errors: x500 arm radius ~0.35 m
+    # + EKF2 position error ~0.15 m + path-tracking deviation ~0.25 m. With
+    # 0.6 / 0.4 the first mission came within 0.38 m of an obstacle surface.
+    inflation_m: 0.75           # planning margin
+    hard_inflation_m: 0.55      # a path is only "blocked" if it violates this (hysteresis)
+    ground_z: -0.24             # odom z of the ground at the start pose
+    ground_margin: 0.25         # points closer to the ground than this are ignored
+    arena_min_xy: [-4.0, -4.0]  # where paths may go (the mission area + margin)
+    arena_max_xy: [14.0, 14.0]
+    validation_horizon_m: 5.0   # only blockages this far ahead trigger a replan
+    z_min: 1.0                  # flight band (odom z)
+    z_max: 2.8
+    depth_max_range: 6.0        # [m] live depth points beyond this are ignored
+    depth_pixel_stride: 4
+    live_decay_s: 4.0           # live depth marks expire after this
+    goal_tolerance: 0.6
+    plan_rate_hz: 5.0
+    rrt_step: 1.0
+    rrt_rewire_radius: 2.5
+    rrt_time_budget_ms: 400
+    rrt_max_nodes: 4000
+    # goals_enu is set by the launch/demo (mission specific).

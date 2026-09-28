@@ -1,0 +1,15 @@
+# Phase 4 demo mission (goals in odom, ENU, relative to the start pose; odom z
+# 1.56 = 1.8 m above ground, since the start pose is 0.24 m up).
+#   1-4  a lap of the 10 m field: builds the map (planned, mostly straight)
+#   5    diagonal to the far corner: the straight line runs through the
+#        centre pillar, so the planner must route around mapped obstacles.
+#        scripts/scenario_intruder.py drops a new obstacle onto this leg.
+#   6    back to the start, then land.
+planner:
+  ros__parameters:
+    goals_enu: [10.0, 0.0, 1.56,
+                10.0, 10.0, 1.56,
+                0.0, 10.0, 1.56,
+                0.0, 0.0, 1.56,
+                9.5, 9.5, 1.56,
+                0.0, 0.0, 1.56]
