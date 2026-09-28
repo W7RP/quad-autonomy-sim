@@ -6,14 +6,11 @@ Pixhawk flight controllers), simulated in **Gazebo Harmonic**. The autonomy
 software is **ROS 2** nodes written in C++20: a hand-rolled state estimator,
 RGB-D mapping, and a 3D planner that replans when the world changes mid-flight.
 
-![Phase 4 mission: planned paths and the flown track around an obstacle dropped mid-flight](docs/media/phase4_mission.png)
+![The drone in Gazebo, with an obstacle just dropped into its path](docs/media/phase4_gazebo.jpg)
 
-*The final demo, seen from above. The drone laps the field to map it, then
-crosses it diagonally. Three metres into the crossing, a 2.6 m box (red) is
-dropped onto its path. It replans in about 0.1 s and goes around. The thin
-lines are the planner's paths over time; the black line is where the vehicle
-actually flew. (The track crossing the tilted box near (7, 3) is not a
-collision: that box is 1.2 m tall, and the planner flies over it.)*
+*The final demo in Gazebo. A 2.6 m box has just been dropped onto the drone's
+planned path, a few metres ahead of it. The drone sees it in its depth camera,
+replans in about 0.1 s and flies around it.*
 
 ## Why it's built this way
 
@@ -85,6 +82,19 @@ with RRT* and shortcut smoothing, and checks the path in force five times a
 second. In five scored runs, the vehicle reached every goal and reacted to
 the dropped obstacle in 0.08-0.15 s. Its closest pass to any real surface was
 0.47 m, and it planned in about 30 ms per replan against a 400 ms budget.
+
+![Before the drop, the box in the path, and the drone going around it](docs/media/phase4_sequence.jpg)
+
+*The same moment from a chase camera: the clear path, the box dropped into it
+(0.7 s later), and the drone passing its side three seconds after that.*
+
+![Phase 4 mission from above: planned paths and the flown track](docs/media/phase4_mission.png)
+
+*The whole mission from above. The drone laps the field to map it, then
+crosses it diagonally; the red box is the one dropped mid-flight. The thin
+lines are the planner's paths over time; the black line is where the vehicle
+actually flew. The track crossing the tilted box near (7, 3) is not a
+collision: that box is 1.2 m tall, and the planner flies over it.*
 
 ## Things that broke
 
