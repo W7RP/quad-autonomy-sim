@@ -1,19 +1,26 @@
 """Phase 3 live mapping: Gazebo RGB-D -> ROS, PX4 odometry -> TF, RTAB-Map.
 
     ros2 launch quad_perception mapping.launch.py [rviz:=true] [database:=/path/rtabmap.db]
-                                                  [odom_source:=px4|gt]
+                                                  [odom_source:=px4|gt] [loop_closure:=true|false]
 
 odom_source:=px4 (default) maps on PX4 EKF2's odometry, as a real vehicle would.
 odom_source:=gt is a SIMULATION-ONLY diagnostic: Gazebo's true pose, stamped on
 the camera's clock. Comparing the two separates odometry errors from mapping
 errors.
 
+loop_closure:=false turns off RTAB-Map's loop-closure and proximity detection:
+the map is then built on the odometry poses alone. Phase 4 plans on the map in
+the odometry frame and uses this. With GPS-aided EKF2 there is no drift to
+correct, and in the repetitive demo world the visual loop closures bent the
+graph: the same database scored 7.5 cm median surface error with its closures
+vs 1.9 cm on odometry poses (docs/phase4_autonomy.md).
+
 Expects the simulator to be running with the x500_mapper vehicle
 (scripts/sim.sh --model x500_mapper --world cluttered). All nodes use
 simulation time, so camera and odometry stamps share one clock.
 """
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.conditions import IfCondition, LaunchConfigurationEquals
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
@@ -37,12 +44,31 @@ def static_tf(parent, child, xyz, rpy):
         parameters=[{"use_sim_time": True}])
 
 
+# RTAB-Map parameters are strings. Kp/MaxFeatures -1 disables loop-closure
+# detection (no visual vocabulary); proximity detection is a separate switch.
+NO_LOOP_CLOSURE = {"Kp/MaxFeatures": "-1", "RGBD/ProximityBySpace": "false"}
+
+
+def rtabmap_node(context):
+    pkg = FindPackageShare("quad_perception")
+    params = [PathJoinSubstitution([pkg, "config", "rtabmap.yaml"]),
+              {"database_path": LaunchConfiguration("database")}]
+    if LaunchConfiguration("loop_closure").perform(context) == "false":
+        params.append(NO_LOOP_CLOSURE)
+    return [Node(package="rtabmap_slam", executable="rtabmap", name="rtabmap", namespace="rtabmap",
+                 parameters=params,
+                 remappings=[("rgb/image", "/camera/color/image_raw"),
+                             ("depth/image", "/camera/depth/image_raw"),
+                             ("rgb/camera_info", "/camera/color/camera_info")],
+                 arguments=["--delete_db_on_start"])]
+
+
 def generate_launch_description():
     pkg = FindPackageShare("quad_perception")
-    database = LaunchConfiguration("database")
     return LaunchDescription([
         DeclareLaunchArgument("rviz", default_value="false"),
         DeclareLaunchArgument("odom_source", default_value="px4", choices=["px4", "gt"]),
+        DeclareLaunchArgument("loop_closure", default_value="true", choices=["true", "false"]),
         DeclareLaunchArgument("database", default_value="/tmp/quad_rtabmap.db",
                               description="RTAB-Map database (deleted at start)"),
 
@@ -61,13 +87,7 @@ def generate_launch_description():
                           "use_sim_time": True}],
              condition=LaunchConfigurationEquals("odom_source", "gt")),
 
-        Node(package="rtabmap_slam", executable="rtabmap", name="rtabmap", namespace="rtabmap",
-             parameters=[PathJoinSubstitution([pkg, "config", "rtabmap.yaml"]),
-                         {"database_path": database}],
-             remappings=[("rgb/image", "/camera/color/image_raw"),
-                         ("depth/image", "/camera/depth/image_raw"),
-                         ("rgb/camera_info", "/camera/color/camera_info")],
-             arguments=["--delete_db_on_start"]),
+        OpaqueFunction(function=rtabmap_node),
 
         Node(package="rviz2", executable="rviz2", name="rviz2",
              arguments=["-d", PathJoinSubstitution([pkg, "config", "mapping.rviz"])],
