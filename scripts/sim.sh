@@ -138,11 +138,13 @@ if [[ -f "$REPO_ROOT/sim/models/$model/px4_airframe" ]]; then
   log "project vehicle $model: starting Gazebo ($world) and spawning it"
   gz sim --verbose=1 -r -s "$world_file" >"${QUAD_LOG_DIR:-/tmp}/gz_server.log" 2>&1 &
   pids+=($!)
+  gz_server_pid=$!
   if ((!headless)); then
     gz sim -g >/dev/null 2>&1 &
     pids+=($!)
   fi
   for _ in $(seq 1 60); do
+    kill -0 "$gz_server_pid" 2>/dev/null || die "Gazebo exited while starting $world (see gz_server.log)"
     gz service -i --service "/world/$world/scene/info" 2>/dev/null | grep -q "Service providers" && break
     sleep 0.5
   done
