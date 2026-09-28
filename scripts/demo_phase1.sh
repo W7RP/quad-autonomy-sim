@@ -12,7 +12,11 @@ source "$REPO_ROOT/scripts/lib/demo_common.sh"
 
 demo_logdir phase1
 logdir="$QUAD_LOG_DIR"
-trap demo_cleanup EXIT INT TERM
+trap demo_cleanup EXIT
+# A trapped INT/TERM would run the handler and then carry on with the script
+# (seen: Ctrl-C stopped the simulator, then the demo went on to start the next
+# step). Exit instead; the EXIT trap cleans up once.
+trap 'exit 130' INT TERM
 log "logs -> $logdir"
 
 demo_start_sim "$logdir" "$@"

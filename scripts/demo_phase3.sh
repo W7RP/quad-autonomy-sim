@@ -21,7 +21,11 @@ source "$REPO_ROOT/scripts/lib/demo_common.sh"
 sim_args=("$@")
 demo_logdir phase3
 logdir="$QUAD_LOG_DIR"
-trap demo_cleanup EXIT INT TERM
+trap demo_cleanup EXIT
+# A trapped INT/TERM would run the handler and then carry on with the script
+# (seen: Ctrl-C stopped the simulator, then the demo went on to start the next
+# step). Exit instead; the EXIT trap cleans up once.
+trap 'exit 130' INT TERM
 log "logs -> $logdir"
 
 command -v rtabmap-export >/dev/null || die "RTAB-Map missing: run scripts/setup/04_install_perception_deps.sh"
