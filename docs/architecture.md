@@ -16,7 +16,26 @@ itself, and PX4 attaches to it (`PX4_GZ_MODEL_NAME`, `PX4_SYS_AUTOSTART`).
 
 Phase 3's ROS nodes (the ros_gz_bridge, the odometry bridge, RTAB-Map) run on
 **simulation time** from Gazebo's `/clock`, because the camera images carry
-Gazebo stamps.
+Gazebo stamps. So does the Phase 4 planner, which projects depth images with
+TF at their stamps.
+
+Phase 4 data flow (`quad_planning/autonomy.launch.py` plus the flight node):
+
+```mermaid
+flowchart LR
+  CAM["Gazebo RGB-D<br/>(ros_gz_bridge)"] --> RTB["RTAB-Map<br/>(loop closure off)"]
+  CAM -- "depth, 15 Hz" --> PLN
+  ODO["px4_odometry_bridge<br/>/odom + TF"] --> RTB & PLN
+  RTB -- "/rtabmap/cloud_obstacles<br/>(map frame, latched)" --> PLN["planner_node<br/>grid + RRT* + validation"]
+  PLN -- "/planner/path (odom, ENU)<br/>empty = hold" --> OFF["quad_offboard<br/>route_source:=planner"]
+  PLN -- "/planner/mission_complete" --> OFF
+  OFF -- "/fmu/in/trajectory_setpoint<br/>(velocity, NED)" --> PX4["PX4"]
+  PX4 -- "/fmu/out/vehicle_odometry" --> ODO
+```
+
+In the demo, `scripts/scenario_intruder.py` moves an obstacle through Gazebo's
+`set_pose` service. It plays the world changing and is not part of the autonomy
+stack; nothing in the flight or planning path depends on it.
 
 PX4 and Gazebo run in lockstep: PX4's clock advances only as Gazebo steps. If
 Gazebo runs slower than real time, the whole simulation slows down consistently
@@ -46,6 +65,12 @@ release. Rules:
 - **Extra topics.** The estimator's inputs (optical flow, rangefinder,
   magnetometer) and the SITL ground truth are not exported by stock PX4. They
   are added by `firmware/px4_patches/0001-*`.
+- **Timestamps from PX4, in SITL.** In lockstep, PX4 publishes a sample within
+  the same simulation step, so a sample's PX4 time equals the ROS sim clock at
+  its arrival: measured 0 ms apart in Phase 4 (for that measurement only,
+  `UXRCE_DDS_SYNCT 0` left PX4's stamps in sim time). Stamping on arrival
+  (`px4_odometry_bridge`) is therefore exact in SITL, and on hardware costs the
+  link latency.
 - **Timesync artefacts.** Stamps can glitch (one sample in raw PX4 boot time) or
   step (−0.3 s to +8 s; large steps when the simulator runs slower than real
   time). Consumers integrate with PX4's own intervals, and accept a stamp jump

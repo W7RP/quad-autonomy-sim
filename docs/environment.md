@@ -133,3 +133,36 @@ GUI open, PX4 dropped to Hold mid-route on every run.** Offboard setpoint stamps
 converted with a stale timesync offset, looked more than `COM_OF_LOSS_T` old.
 Fixed by sending timestamp 0 (stamp on arrival). GUI demo: 3/3 passes after,
 0/3 before; Phases 1 and 2 and 34 unit tests re-verified.
+
+## Phase 4 additions (verified 2026-09-28)
+
+| Item | Value |
+|---|---|
+| gz-transport Python bindings | `python3-gz-transport13` / `python3-gz-msgs10`, installed with Gazebo Harmonic; used by `scripts/scenario_intruder.py` |
+| Vehicle / world | `x500_mapper` / generated `sim/worlds/demo_final.sdf` (the `cluttered` field + a movable intruder + a recording camera) |
+| Parameter change | `EKF2_GPS_DELAY 0` in `sitl_only.params` (see issue 16) |
+| Simulation speed | about 0.5-0.65x real time with the camera, RTAB-Map and the planner running |
+
+| Check | Result |
+|---|---|
+| Unit tests (all four packages) | 42 tests, 0 failures, 0 compiler warnings |
+| Phase 4 demo, 3 headless + 2 GUI runs | 5/5 pass: all goals, landed; min clearance 0.47-0.66 m; intruder reaction 0.08-0.15 s; 25-36 plans, max 43 ms; planner map 0 % phantoms |
+| Phase 1 demo (regression) | pass, twice: 5.65 x 5.76 and 5.67 x 5.63 m square (was 5.35 x 5.43). The corners overshoot ~0.3 m more since `EKF2_GPS_DELAY 0`: the old 0.1 s estimate lead made the vehicle brake early |
+| Phase 2 demo (regression) | pass: ESKF horizontal RMSE 0.170 m (EKF2 0.243 m), yaw 0.38 deg; IMU callback 10 us mean / 88 us max, 0 overruns, 0 hot-path allocations |
+| Phase 3 demo (regression) | pass, headless and GUI: median 6.4 / 1.9 cm, 0 % phantoms. On odometry poses (no loop-closure optimisation) both maps score 1.7-1.8 cm |
+
+Issues hit during Phase 4, with details in docs/phase4_autonomy.md
+("Findings along the way"):
+
+14. **The scenario's `gz service` call took ~1 s under GUI load**, so the
+    intruder landed late and close. Replaced by an in-process gz-transport
+    request.
+15. **Ghost walls in the planner's map**, from three causes: 16, 17 and 18.
+16. **EKF2 ran 0.1 s ahead of ground truth** because it compensated a 110 ms
+    GPS delay the simulated GPS doesn't have. `EKF2_GPS_DELAY 0` in SITL.
+17. **RTAB-Map loop closures bent the map** (7.5 cm vs 1.9 cm on odometry
+    poses). Off for Phase 4.
+18. **Mapping started before EKF2 had a heading.** The odometry bridge waits
+    for a valid estimate.
+19. **Demo scripts carried on after Ctrl-C.** A trapped INT ran the cleanup
+    and then continued; they now exit.

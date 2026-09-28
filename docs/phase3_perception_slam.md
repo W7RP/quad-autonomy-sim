@@ -54,6 +54,29 @@ ODOM_SOURCE=gt scripts/demo_phase3.sh --headless    # ground-truth odometry (dia
 Each run leaves `logs/phase3_<ts>/rtabmap.db`, openable in
 `rtabmap-databaseViewer`, plus `cloud.ply`, `map.png` and `map_metrics.json`.
 
+## Update after Phase 4
+
+Phase 4 found two things that change the explanation above. The numbers above
+are left as they were measured.
+
+- **EKF2 was running 0.1 s ahead of the truth.** PX4's simulated GPS has no
+  latency, but EKF2 compensated for the hardware default of 110 ms
+  (`EKF2_GPS_DELAY`). At 1.5 m/s that is ~0.15 m, which is most of the
+  "0.13 m position error" above. SITL now sets `EKF2_GPS_DELAY 0`. The
+  arrival-time stamping suspected above turned out to be exact in lockstep
+  SITL (measured 0 ms).
+- **Loop closures, not odometry, cause the remaining spread.** With the fix,
+  two runs of this demo scored 6.4 cm (headless) and 1.9 cm (GUI) median. The
+  same two databases exported on odometry poses alone, without RTAB-Map's
+  loop-closure optimisation, score 1.8 and 1.7 cm median, 99.5 % within 10 cm
+  and no phantoms. That is essentially the ground-truth-odometry baseline. The
+  136 visual loop closures in the 6.4 cm run bent the map; this world's single
+  repeated texture makes wrong closures easy.
+
+Phase 3's configuration is unchanged (loop closure on, as tagged). Phase 4,
+which plans on the map, maps with loop closure off
+(docs/phase4_autonomy.md).
+
 ## Design
 
 ```mermaid
@@ -158,8 +181,8 @@ same setup; the conclusions were not re-verified on clean runs.
 
 ## Known limitations
 
-- **Odometry-limited accuracy:** 6.4 cm median, with a tail to about 0.4 m
-  (ghosting). This comes from EKF2's roughly 2 deg heading error and 0.13 m
+- **Odometry-limited accuracy** (superseded; see *Update after Phase 4*):
+  6.4 cm median, with a tail to about 0.4 m (ghosting). This comes from EKF2's roughly 2 deg heading error and 0.13 m
   position error, possibly plus arrival-time stamping. Candidates: estimate the
   PX4-to-sim time offset instead of stamping on arrival; fuse the camera into
   the odometry (visual-inertial); use RTAB-Map's own visual odometry.
@@ -168,5 +191,6 @@ same setup; the conclusions were not re-verified on clean runs.
 - **Far ground at grazing angles** (8-10 m) picks up height error with EKF2
   odometry. It disappears with ground-truth odometry.
 - **Same texture everywhere:** the whole world uses one texture, which invites
-  wrong loop closures. None was observed to damage the map (0 phantom points),
-  but a real environment should be richer.
+  wrong loop closures. None was observed to damage the map (0 phantom points)
+  at the time; Phase 4 later showed they do cost accuracy (*Update after
+  Phase 4*). A real environment should be richer.
